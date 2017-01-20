@@ -1,0 +1,35 @@
+#!/bin/sh
+
+for pid in `ps | grep -e 'get-5g-rx-rate' | awk '{print $1}'`; do
+    if [ -d /proc/$pid ] && [ "$pid" -lt "$$" ]; then
+        # kill previous get-5g-rx-rate
+        kill -9 $pid
+    fi
+done
+
+assoc=0
+echo 0 >/tmp/qt_rx_rate
+
+while :; do
+
+    qcsapi_sockrpc get_rx_phy_rate wifi0 0 > /tmp/tmp_qt_rx_rate
+    grep  error /tmp/tmp_qt_rx_rate >/dev/null 2>&1
+    if [ "$?" = "0" ]; then
+        echo 0 > /tmp/qt_rx_rate
+        assoc=0
+    else
+        rx_rate=`cat /tmp/tmp_qt_rx_rate`
+        if [ "$rx_rate" -gt "7" ]; then
+            echo "$rx_rate" > /tmp/qt_rx_rate
+        else
+            if [ "$assoc" = "0" ]; then
+                qcsapi_sockrpc get_achievable_rx_phy_rate wifi0 0 > /tmp/qt_max_rx_rate
+                max_rx_rate=$((`cat /tmp/qt_max_rx_rate`/1000))
+                echo "$max_rx_rate" > /tmp/qt_rx_rate
+            fi
+        fi
+        assoc=1
+    fi
+    rm /tmp/tmp_qt_rx_rate
+    sleep 1
+done

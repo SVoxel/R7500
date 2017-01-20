@@ -1,0 +1,467 @@
+#!/bin/sh
+[ -f ${STREAMBOOST_CFGDIR:-/etc/appflow}/rc.appflow ] && . ${STREAMBOOST_CFGDIR:-/etc/appflow}/rc.appflow
+
+START=98
+STOP=10
+
+NAME="streamboost"
+DISPLAY_NAME="StreamBoost"
+
+INITDIR=${INITDIR:-"$CFGDIR/$NAME.d"}
+
+DEFAULT_ACTION=${DEFAULT_ACTION:-"status"}
+
+BOOTFLAG=$RUNDIR/streamboost.boot.flag
+STREAMBOOST_TMPFILE=/tmp/streamboost.tmp
+
+APERTURE_NAME="aperture"
+MEASUREFILE="$RUNDIR/aperture_last_measurement"
+
+LOGGER="logger -s -p daemon.info -t $NAME"
+AUTO_BOOT=yes
+
+# cloud-updatable files in alphabetical order
+CLOUD_PACKAGES="wopr-db policy-redis p0f-db checkpcap macoui-db"
+
+# sb_disable_nss
+# Disable NSS in runtime.
+# input $1:
+# '1' disable NSS: All flows will be forwarded to the HLOS
+# '0' enable NSS: Flows will be accelerated and bypass the HLOS
+sb_disable_nss() {
+	[ -e /etc/init.d/qca-nss-connmgr ] && {
+		[ "$1" == "1" ] && /etc/init.d/qca-nss-connmgr stop
+		[ "$1" == "0" ] && /etc/init.d/qca-nss-connmgr start
+	}
+}
+
+# tests whether the ECM package is installed
+ecm_is_installed() {
+	opkg list | grep qca-nss-ecm >/dev/null 2>&1
+	[ "$?" = "0" ] || return 1
+}
+
+# this is the control file for the ecm nl classifier module that allows
+# us to disable and enable it by echoing 0 or 1 respectively
+ECM_NL_ENABLED=/sys/devices/system/ecm_classifier_nl/ecm_classifier_nl0/enabled
+
+# tests to see if ECM is up and ready to receive commands.
+# returns 0 if ECM is fully up and ready, else 1
+ecm_is_ready() {
+	[ ! -w ${ECM_NL_ENABLED} ] && {
+		return 1
+	}
+	return 0
+}
+
+# disable_ecm_nl
+# Disables the NSS ECM NL classifier module in runtime.
+disable_ecm_nl() {
+	ecm_is_installed || {
+		#echo "disable ecm: ecm not installed"
+		return
+	}
+	ecm_is_ready || {
+		#echo "disable ecm: ecm not ready"
+		return
+	}
+	[ -e ${ECM_NL_ENABLED} ] && {
+		echo 0 > ${ECM_NL_ENABLED}
+	}
+}
+
+# enable_ecm_nl
+# Enables the NSS ECM NL classifier module in runtime.
+enable_ecm_nl() {
+	ecm_is_installed || {
+		#echo "enable ecm: ecm not installed"
+		return
+	}
+	ecm_is_ready || {
+		#echo "enable ecm: ecm not ready"
+		return
+	}
+	[ -e ${ECM_NL_ENABLED} ] && {
+		echo 1 > ${ECM_NL_ENABLED}
+	}
+}
+apply_action() {
+	action=$1
+	target=$2
+	retval=0
+	local nss_action=""
+	local ecm_action=""
+	shift
+	shift
+	[ "$action" != "status" ] && $LOGGER "$DISPLAY_NAME: Executing $action $target"
+	[ "$target" = "all" ] && {
+		if [ "$action" = "stop" ]; then
+			############## comment form QCA #########################
+			# we don't want to restart nss because it could break   #
+			# other components such as hy-fi.  even though we       #
+			# may have disabled it, just leave it disabled for now. #
+			#########################################################
+
+			### However DNI still restart nss for now 
+			nss_action="start"
+			ecm_action="stop"
+			delete_sys_conf="yes"
+			target="$(ls -r $INITDIR/??_*)"
+		else
+			target="$(ls $INITDIR/??_*)"
+		fi
+
+		[ "$action" = "start" -o "$action" = "boot" ] && {
+			ecm_action="start"
+			nss_action="stop"
+			enabled || {
+				$LOGGER Skipping $action action, global disable flag is in effect.
+				exit 0
+			}
+		}
+
+		# If we haven't booted yet, don't allow start.  e.g. hotplug
+		[ "$action" = "start" -a ! -e $BOOTFLAG ] && {
+			if [ "$AUTO_BOOT" = "yes" ]; then
+				$LOGGER streamboost boot has not been run yet, auto-booting...
+				action=boot
+			else
+				$LOGGER Skipping streamboost start until streamboost boot has been run.
+				exit 0
+			fi
+		}
+
+		# Set a boot flag when we first boot.
+		[ "$action" = "boot" ] && set_boot_flag=yes && preboot 
+	}
+	[ "$nss_action" = "stop" ] && sb_disable_nss 1
+	[ "$ecm_action" = "start" ] && enable_ecm_nl
+	for i in $target; do
+		service_name=$(basename $i)
+		if [ "$action" = "start" -o "$action" = "boot" ]; then
+			$i status >/dev/null 2>&1 || $i $action "$@" >$STREAMBOOST_TMPFILE 2>&1
+		else
+			$i $action "$@" >$STREAMBOOST_TMPFILE 2>&1
+		fi
+		retval=$?
+		if [ "$action" = "status" ]; then
+			if [ $retval -eq 0 ]; then
+				echo -n " [  UP  ] "
+			else
+				echo -n " [ DOWN ] "
+			fi
+			cat $STREAMBOOST_TMPFILE
+		else
+			if [ $retval -eq 0 ]; then
+				echo " [  OK  ] $service_name $action"
+				[ "$VERBOSE" = "yes" ] && cat $STREAMBOOST_TMPFILE
+			else
+				$LOGGER Action failed: $action $service_name
+				echo " [ FAIL ] $service_name $action"
+				cat $STREAMBOOST_TMPFILE
+				[ "$action" = "start" ] && exit $retval
+			fi
+		fi
+	done
+	[ "$nss_action" = "start" ] && sb_disable_nss 0
+	[ "$ecm_action" = "stop" ] && disable_ecm_nl
+	[ "$action" = "boot" -o "$action" = "start" -o "$action" = "stop" ] && net-wall restart 
+	# Bug 50855, this is workaround, we will find a better solution.
+	if [ "$action" = "boot" -o "$action" = "start" ]; then
+		poll_set_priority
+	else
+		if [ "$action" = "stop" ]; then
+			killall poll_set_priority
+		fi
+	fi
+	# Currently, in case update hang, after streamboost is started, we update the database in the backgound
+	[ "$action" = "boot" -o "$action" = "start" ] && sb_update_database $action &
+	[ "$set_boot_flag" = "yes" ] && touch $BOOTFLAG
+	[ "$delete_sys_conf" = "yes" ] && rm "$STREAMBOOST_SYS_CFG"
+	return $retval
+}
+
+status() {
+	apply_action status all
+}
+
+restart() {
+	echo "$DISPLAY_NAME: Restarting"
+	apply_action stop all "$@"
+	apply_action start all "$@"
+}
+
+disable() {
+        daemon="$(basename $0)"
+
+        if [ -z "${START}" ]; then
+                echo "$0 has no START value"
+                return 1
+        fi
+
+        if [ -z "${STOP}" ]; then
+                echo "$0 has no STOP value"
+                return 2
+        fi
+
+        rm -f "${IPKG_INSTROOT}/etc/rc.d/S${START}${daemon}"
+        rm -f "${IPKG_INSTROOT}/etc/rc.d/K${STOP}${daemon}"
+	echo "$DISPLAY_NAME: Auto-Run At Boot Disabled"
+}
+
+enable() {
+        daemon="$(basename $0)"
+
+        if [ -z "${START}" ]; then
+                echo "$0 has no START value"
+                return 1
+        fi
+
+        if [ -z "${STOP}" ]; then
+                echo "$0 has no STOP value"
+                return 2
+        fi
+
+        ln -s "../init.d/${daemon}" "${IPKG_INSTROOT}/etc/rc.d/S${START}${daemon}"
+        ln -s "../init.d/${daemon}" "${IPKG_INSTROOT}/etc/rc.d/K${STOP}${daemon}"
+	echo "$DISPLAY_NAME: Auto-Run At Boot Enabled"
+}
+
+read_config() {
+	[ -f $STREAMBOOST_USER_CFG ] || {
+		$LOGGER "User config file $STREAMBOOST_USER_CFG does not exist, exiting"
+		echo >&2 "User config file $STREAMBOOST_USER_CFG does not exist, exiting"
+		return 1
+	}
+
+	improve_streamboost=$(config get improve_streamboost)
+	auto_bandwidth=$(config get auto_bandwidth)
+	auto_update=$(config get auto_update)
+
+	ENABLE_GWCLIENT=$improve_streamboost
+	ENABLE_APERTURE=$auto_bandwidth
+	ENABLE_AUTO_UPDATE=$auto_update
+	ENABLE_AUTO_UPLOAD=$improve_streamboost
+	export ENABLE_GWCLIENT ENABLE_APERTURE ENABLE_AUTO_UPDATE ENABLE_AUTO_UPLOAD
+}
+
+measure() {
+	if apply_action measure ${INITDIR}/??_$APERTURE_NAME "$MEASUREFILE"; then
+		sed -n 's/^Up /uplimit=/p;s/^Down /downlimit=/p' <$MEASUREFILE
+		echo 'Apply results with "streamboost applybw".'
+	else
+		return 3
+	fi
+}
+
+applybw() {
+	apply_action applybw ${INITDIR}/??_$APERTURE_NAME "$MEASUREFILE"
+}
+
+ifup() {
+	$LOGGER "Event ifup $@"
+	AUTO_BOOT=no
+	enabled && apply_action start all
+}
+
+ifdown() {
+	$LOGGER "Event ifdown $@"
+	apply_action stop all
+}
+
+preboot() {
+	# link all the updatable files from CFGDIR to RUNDIR
+	for f in $CLOUD_FILES
+	do
+		ln -sf "$CFGDIR/$f" "$RUNDIR/$f"
+	done
+
+	mkdir -p $STORAGEDIR
+}
+
+# Print the versions of all the cloud-updatable files/packages
+print_versions() {
+	[ -f "$STORAGEDIR/last_updated" ] && cat "$STORAGEDIR/last_updated" || echo "No updates installed."
+	for pkg in $CLOUD_PACKAGES; do
+		grep "Version:" "/usr/lib/opkg/info/$pkg.control" | awk -v "pkg=$pkg" '{print pkg " - " $2}'
+	done
+}
+
+auto_update() {
+	[ "$ENABLE_AUTO_UPDATE" = "1" ] || {
+		$LOGGER "Automatic updates are disabled.  Using existing files."
+		return 10
+	}
+	# NTGR Spec request: 
+	enabled || {
+		$LOGGER "Streamboost is not enabled, auto update will not run."
+		return 11
+	}
+	update
+	return $?
+}
+
+update() {
+	$LOGGER "streamboost update $@"
+	UPDATE_STATUS=0
+	MACADDR=$(ifconfig $LAN_IFACE | awk '/HWaddr/ {print $5}')
+	if opkg -v >/dev/null 2>&1; then
+		# opkg-based system
+		SB_OPKG_CONF=/var/run/appflow/opkg.conf
+		UPGRADE_LOG=/var/run/appflow/upgrade.log
+		# Make our own opkg.conf with our repo src
+		if [ -f /etc/opkg.conf ]; then
+			grep -v "^src" /etc/opkg.conf > "$SB_OPKG_CONF"
+			sed s/%h/"$UPDATE_HOST"/g /etc/appflow/streamboost.opkg.conf >> "$SB_OPKG_CONF"
+			echo "option http_query macaddr=$MACADDR" >> "$SB_OPKG_CONF"
+		else
+			$LOGGER "[ FAIL ] Could not find /etc/opkg.conf."
+			return 20
+		fi
+		opkg -f "$SB_OPKG_CONF" update && opkg -f "$SB_OPKG_CONF" upgrade $CLOUD_PACKAGES | tee $UPGRADE_LOG
+		UPDATE_STATUS=$?
+		if [ $UPDATE_STATUS -eq 0 ]; then
+			if grep "Upgrading" $UPGRADE_LOG; then
+				echo "Last updated: $(date)" > "$STORAGEDIR/last_updated"
+				opkg -f "$SB_OPKG_CONF"  info wopr-db > /etc/appflow/database_versions
+				$LOGGER "[  OK  ] Update successful.  Run streamboost restart to use updated definitions."
+			else
+				$LOGGER "[  OK  ] Everything is up-to-date."
+				return 11
+			fi
+		else
+			$LOGGER "[ FAIL ] Update failed."
+		fi
+	else
+		$LOGGER "[ FAIL ] Could not run opkg."
+	fi
+
+	return $UPDATE_STATUS
+}
+
+auto_upload() {
+	[ "$ENABLE_AUTO_UPLOAD" = "1" ] || {
+		$LOGGER "Automatic uploads are disabled.  Exiting."
+		return 0
+	}
+	upload
+	return $?
+}
+
+upload() {
+	$LOGGER "streamboost upload $@"
+	UPLOAD_STATUS=0
+	RET=0
+
+	upload_events >/dev/null 2>&1
+	UPLOAD_STATUS=$?
+	if [ $UPLOAD_STATUS -eq 0 ]; then
+	    $LOGGER "[  OK  ] Upload events successful."
+	else
+	    $LOGGER "[ FAIL ] Upload events failed."
+	    RET=1
+	fi
+
+	upload_pcaps >/dev/null 2>&1
+	UPLOAD_STATUS=$?
+	if [ $UPLOAD_STATUS -eq 0 ]; then
+	    $LOGGER "[  OK  ] Upload pcaps successful."
+	else
+	    $LOGGER "[ FAIL ] Upload pcaps failed."
+	    RET=$(($RET + 2))
+	fi
+
+	upload_stats >/dev/null 2>&1
+	UPLOAD_STATUS=$?
+	if [ $UPLOAD_STATUS -eq 0 ]; then
+	    $LOGGER "[  OK  ] Upload stats successful."
+	else
+	    $LOGGER "[ FAIL ] Upload stats failed."
+	    RET=$(($RET + 4))
+	fi
+	return $RET
+}
+
+enabled() {
+	enable_streamboost=$(config get streamboost_enable)
+	[ "$enable_streamboost" = "1" ] || return 1
+}
+
+setbw() {
+	uplimit=$1
+	downlimit=$2
+	[ -n $downlimit -a -n uplimit -a $downlimit -eq $downlimit -a $uplimit -eq $uplimit ] && {
+		redis-cli set settings:bw:up $uplimit
+		redis-cli set settings:bw:down $downlimit
+		redis-cli publish bandwidth.events "$uplimit;$downlimit"
+	}
+}
+
+update_fmn(){
+	local FILE=flows_EN-US.json
+	URL="http://$STATIC_HOST/luci-app-streamboost-assets/$UPDATE_VERSION/trans/$FILE"
+
+	rm -f /www/$FILE.new
+	wget  -T 15 $URL -O /www/$FILE.new
+	RET=$?
+	[ "$RET" = "0" ] && mv /www/$FILE.new /www/$FILE
+	return $RET
+}
+
+[ "$1" = "--verbose" ] && {
+	VERBOSE=yes
+	shift
+}
+target=all
+action=${1:-$DEFAULT_ACTION}
+shift
+[ -z "$IPKG_INSTROOT" ] && {
+	read_config || {
+		echo "Not executing ${action}, read_config failed"
+		exit 2
+	}
+}
+[ -f $INITDIR/??_$action ] && {
+	target=$INITDIR/??_$action
+	action=${1:-$DEFAULT_ACTION}
+	shift
+}
+
+case "${action}" in
+	# Global-only actions
+	enable|disable|ifup|ifdown|measure|applybw|enabled|update|auto_update|upload|auto_upload|setbw|print_versions|update_fmn)
+		if [ "$target" = "all" ]; then
+			${action} "$@"
+		else
+			echo "${action} is not supported for individual daemons"
+		fi
+		;;
+	restart|status)
+		if [ "$target" = "all" ]; then
+			${action}
+		else
+			apply_action $action "$target" "$@"
+		fi
+		;;
+	boot)
+		apply_action $action "$target" "$@"
+		;;
+	start|stop|reload)
+		apply_action $action "$target" "$@"
+		;;
+	flashything)
+		apply_action stop ${INITDIR}/??_bwcd
+		apply_action stop ${INITDIR}/??_p0f
+		rm ${STORAGEDIR}/bwcd_nodes.json
+		apply_action start ${INITDIR}/??_p0f
+		apply_action start ${INITDIR}/??_bwcd
+		;;
+	*)
+		echo "Unknown command: ${action}"
+		echo "Usage: $0 [--verbose] [daemon] start|stop|boot|reload|restart|status"
+		echo "       $0 [--verbose] measure|applybw|enabled|ifup|ifdown"
+		echo "       $0 update|auto_update|upload|auto_upload"
+		echo "       $0 setbw <uplimit> <downlimit>"
+		exit 3
+esac
+exit $?

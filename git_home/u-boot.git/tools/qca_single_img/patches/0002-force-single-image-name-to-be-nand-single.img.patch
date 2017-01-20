@@ -1,0 +1,26 @@
+From 23f76b02984438b0fb296d7f1fa655f3b85f0fc8 Mon Sep 17 00:00:00 2001
+From: George Hsiao <george.hsiao@dniserver.dnish.net>
+Date: Fri, 14 Feb 2014 15:17:10 +0800
+Subject: [PATCH 2/2] force single image name to be 'nand-single.img'
+
+Signed-off-by: George Hsiao <george.hsiao@dniserver.dnish.net>
+---
+ common/build/update_common_info.py |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/common/build/update_common_info.py b/common/build/update_common_info.py
+index 319e07d..251d81c 100755
+--- a/common/build/update_common_info.py
++++ b/common/build/update_common_info.py
+@@ -523,7 +523,7 @@ if FIT_tool:
+    distutils.dir_util.copy_tree( exported_tools ,tools_dir)	
+     
+    lg.log("update_common_info: Generate ipq single image")
+-   lg.log_exec(['python',pack_tool,'-t','nand','-B','-F','boardconfig', '-o', bin_dir +'/'+'nand-ipq806x-single.img',ipq_dir],verbose=0)
++   lg.log_exec(['python',pack_tool,'-t','nand','-B','-F','boardconfig', '-o', bin_dir +'/'+'nand-single.img',ipq_dir],verbose=0)
+ 
+ lg.log("update_common_info.py:============ UPDATE COMMON INFO COMPLETE====================",verbose=0)
+ 
+-- 
+1.7.2.5
+

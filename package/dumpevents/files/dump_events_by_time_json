@@ -1,0 +1,20 @@
+#!/bin/sh
+
+PROG=`basename $0`
+
+usage() {
+	echo "usage: $PROG begin_time end_time [keys...]"
+}
+
+if [ $# -lt 2 ]; then
+	usage
+	exit 1
+fi
+
+begin=$1
+end=$2
+
+shift 2
+keys="${@:-eventdb:events}"
+
+redis-cli --eval /usr/bin/filter_events_by_time.lua $keys , $begin $end

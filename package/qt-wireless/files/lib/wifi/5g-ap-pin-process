@@ -1,0 +1,73 @@
+#!/bin/sh
+#
+# Quantenna Inc..
+#
+
+LED_off='/sbin/ledcontrol -n wps -c green -s off'
+LED_on='/sbin/ledcontrol -n wps -c green -s on'
+ENABLE_11G=`/bin/config get endis_wl_radio`
+ENABLE_11A=`/bin/config get endis_wla_radio`
+SECURITY_TYPE_11G=`/bin/config get wl_sectype`
+SECURITY_TYPE_11A=`/bin/config get wla_sectype`
+
+PID_file=/var/run/5g_ap_pin_process.pid
+echo "$$" > $PID_file
+for pid in `ps | grep -e '5g-ap-pin-process' | awk '{print $1}'`; do
+    if [ -d /proc/$pid ] && [ "$pid" -lt "$$" ]; then
+        # kill previous 5g ap pin process
+        kill -9 $pid
+    fi
+done
+
+start_ap_pin=0
+
+ap_pin_success_process()
+{
+    # QTN-V36.6.0.6 cannot alway get correct wireless setting right now after WPS done
+    # This is workaround for delay 3s
+    sleep 3
+    authproto=`qcsapi_sockrpc get_beacon wifi0`
+    if [ "$authproto" = "Basic" ]; then
+        tmp_wpa=0
+    elif [ "$authproto" = "11i" ]; then
+        tmp_wpa=2
+    elif [ "$authproto" = "WPAand11i" ]; then
+        tmp_wpa=3
+    fi
+    tmp_wpa_passphrase=`qcsapi_sockrpc get_passphrase wifi0 0`
+    tmp_ssid=`qcsapi_sockrpc get_SSID wifi0`
+    ACTION="SET_CONFIG" TMP_WPA="$tmp_wpa" TMP_WPA_PASSPHRASE="$tmp_wpa_passphrase" TMP_SSID="$tmp_ssid" TYPE="AP_PIN" /lib/wifi/5g-wps-process
+
+    [ "${ENABLE_11G}" = "1" -o "${ENABLE_11A}" = "1" ] && [ "${SECURITY_TYPE_11G}" -gt "1" -o "${SECURITY_TYPE_11A}" -gt "1" ] && eval ${LED_on} || eval ${LED_off}
+
+    start_ap_pin=0
+}
+
+while :; do
+    #qt_state=`qcsapi_sockrpc get_wps_state wifi0 | cut -d" " -f1`
+    qcsapi_sockrpc get_wps_state wifi0 > /tmp/tmp_qt_state
+    qt_state=$(cut -d" " -f1 /tmp/tmp_qt_state)
+    case $qt_state in
+        0) # no WPS process start or ap pin success
+            # if state from 3 to 0, that is ap pin success
+            [ "$start_ap_pin" -eq "1" ] && {
+                ap_pin_success_process
+            }
+            ;;
+        3) #WPS ERROR: if we see this, "maybe" ap pin is started
+            start_ap_pin=1
+            ;;
+        10) #WPS_AP_PIN_SUCCESS
+            ap_pin_success_process
+            ;;
+        11) #WPS_AP_PIN_ERROR
+            EVENT=ADD_FAILURE_NUM /lib/wifi/ap-pin-counter
+            ACTION="CANCEL_WPS" /lib/wifi/5g-wps-process
+            start_ap_pin=0
+            ;;
+        *)
+            ;;
+    esac
+    rm /tmp/tmp_qt_state
+    sleep 1
+done

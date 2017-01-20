@@ -1,0 +1,40 @@
+#!/bin/sh
+
+if [ $# -lt 1 ]; then
+	echo "usage: $0 git_home [module]"
+	exit
+fi
+
+git_home=$1
+PWD=$(pwd)
+TOPDIR=$PWD/git_update
+
+if [ $# -gt 1 ]; then
+	module=$2
+fi
+
+printf "please entry your username in dniserver:"
+read username
+
+stty -echo
+printf "please entry your password in dniserver:"
+read password
+stty echo
+echo ""
+
+for remote_repository in $(cat $TOPDIR/git-packages); do
+	server=$(echo $remote_repository | awk -F '/' '{print $1}')
+	remote_path=$(echo $remote_repository | sed "s/^$server//")
+	local_path=$git_home/$(basename $remote_repository)
+	if [ "x$module" != "x" ] && [ "$module" != "$(basename $remote_repository)" ]; then
+		continue
+	fi
+
+	if [ -d $local_path ]; then
+		echo "update $local_path"
+			cd $local_path; $TOPDIR/git-fetch-with-account $server $username $password; cd -
+	else
+		echo "clone $remote_repository to $local_path"
+		$TOPDIR/git-clone-with-account $server $username $password $remote_path $local_path
+	fi
+done

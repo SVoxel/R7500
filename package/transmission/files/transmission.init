@@ -1,0 +1,39 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+STOP=20
+
+start() {
+	# Killall transmission-daemon
+	killall -9 transmission-daemon
+
+	# Create directories in /tmp
+	if [ ! -d /tmp/transmission ]; then
+		mkdir /tmp/transmission
+	fi
+
+	if [ ! -d /tmp/transmission/blocklists ]; then
+		mkdir /tmp/transmission/blocklists
+	fi
+
+	if [ ! -d /tmp/transmission/resume ]; then
+		mkdir /tmp/transmission/resume
+	fi
+
+	if [ ! -d /tmp/transmission/torrents ]; then
+		mkdir /tmp/transmission/torrents
+	fi
+
+	# Create zero size stats file
+	if [ ! -f /tmp/transmission/stats.json ]; then
+		cat /tmp/transmission/stats.json > /tmp/transmission/stats.json
+	fi
+
+	# Start transmission-daemon
+	/usr/bin/transmission-daemon -g /etc/transmission
+}
+
+stop() {
+	# Killall transmission-daemon
+	killall -9 transmission-daemon
+}

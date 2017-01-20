@@ -1,0 +1,65 @@
+#!/bin/sh
+
+. ${STREAMBOOST_CFGDIR:-/etc/appflow}/rc.appflow
+
+#
+# Environment config
+#
+BINARY="cape"
+NAME=${BINARY}
+DISPLAY_NAME="Class Arbiter/Policy Engine"
+
+#
+# Cape config
+#
+# path to cape binary
+CAPE_BIN="${BINDIR}/${BINARY}"
+
+# path to cape pid file
+PIDFILE="${RUNDIR}/${BINARY}.pid"
+
+# Redis server port
+PORT=6379
+
+# Format the command line parameters
+CMDLINE_OPTS="--daemon -o ${PORT} -p ${PIDFILE}"
+
+#
+# Functions
+#
+
+start() {
+	[ ! -d "${RUNDIR}" ] && {
+		mkdir ${RUNDIR}
+	}
+
+	[ -x ${CAPE_BIN} ] || {
+		echo "${BINARY} not found: ${CAPE_BIN}"
+		exit 2
+	}
+
+	echo -n "Starting ${NAME}: "
+	${CAPE_BIN} ${CMDLINE_OPTS} "$@"
+	retval=$?
+	echo
+	return ${retval}
+}
+
+boot() {
+	start "$@"
+}
+
+stop() {
+	[ -f "${PIDFILE}" ] && {
+		echo -n "Stopping ${NAME}: "
+		kill -TERM $(cat ${PIDFILE})
+		retval=$?
+		echo
+		[ ${retval} -eq 0 ] && rm -f ${PIDFILE}
+		return ${retval}
+	}
+	return 0
+}
+
+action "$@"
+exit $?

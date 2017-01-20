@@ -1,0 +1,8 @@
+#!/bin/sh /etc/rc.common
+START=10
+
+boot() {
+    echo 1 > /proc/sys/quantenna/nss/enable
+    echo 1 > /proc/sys/qtn_dni/blink_5g_led
+    echo 2 > /proc/irq/67/smp_affinity
+}

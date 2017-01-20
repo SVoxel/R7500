@@ -1,0 +1,194 @@
+<% http_header("style/form.css", "/funcs.js", "/jquery-1.7.2.min.js", "/streamboost.js") %>
+<% body_header("_new_attach_device", "QOS_edit_devices.htm", "select_qos_edit") %>
+<style type="text/css">
+#tooltip{border:1px solid #000; position:absolute; height:58px; _width:100px; _white-space:nowrap; padding-left:8px; z-index:10; background-color:#fff; background-repeat:no-repeat; background-position:right top;}
+#tooltip div{color:#000; font-weight:bold; height:58px; padding-right:8px; line-height:19px; background-color:#fff; background-repeat:no-repeat; background-position:right top;}
+</style>
+<script language="javascript" type="text/javascript">
+$(function(){
+	//tooltip
+	var mouseon=false;
+	$('.device_name[title]').mouseover(function(e){
+		var tip=$(this).attr('title');
+		mouseon=true;
+		$(this).attr('title','');
+		$("body").append('<div id="tooltip"><div>'+tip+'</div></div>');
+		$('#tooltip').css('top',e.pageY+25);
+		$('#tooltip').css('left',e.pageX-$('#tooltip').width()+130);
+		$('#tooltip').show();
+	}).mousemove(function(e){
+		$('#tooltip').css('top',e.pageY+25);
+		$('#tooltip').css('left',e.pageX-$('#tooltip').width()+130);
+	}).mouseout(function(){
+		if(mouseon==true){
+			$(this).attr('title',$('#tooltip div').html());
+			$("#tooltip").remove();
+			mouseon=false;
+		}
+	});
+});
+
+<% list_access_control_device() %>
+
+<% refresh_timestamp("select_qos_edit") %>
+var ts='<% cfg_get("select_qos_edit") %>';
+var enable_block_device="<% cfg_get("enable_block_device") %>";
+
+var mac_addr=new Array();
+var ip_addr=new Array();
+var name_addr=new Array();
+var prio_addr=new Array();
+var enable_bridge_flag="<% cfg_get("bridge_mode") %>";
+
+function goto_url()
+{
+	location.href="access_control.htm";
+}
+
+function show_wlan_ssid(name)
+{
+	var wlan_ssid="";
+	if(name=="wired")
+		wlan_ssid="";
+	else if(name=="primary")
+		wlan_ssid="<br>@wlan_guest_ssid: "+wl_ssid;
+	else if(name=="guest")
+		wlan_ssid="<br>@wlan_guest_ssid: "+wlgl_ssid;
+	else if(name=="primary_an")
+		wlan_ssid="<br>@wlan_guest_ssid: "+wla_ssid;
+	else if(name=="guest_an")
+		wlan_ssid="<br>@wlan_guest_ssid: "+wlal_ssid;
+	else
+		wlan_ssid="";
+	return wlan_ssid;
+}
+
+function loadvalue()
+{
+	if(enable_block_device == "0")
+	{
+		$("#aorb_status").hide();
+		$(".koo>tr>td:nth-child(2)").hide();
+	} else {
+		$("#aorb_status").show();
+		$(".koo>tr>td:nth-child(2)").show();
+	}
+	var TableSorter1 = new TSorter(0);
+	TableSorter1.init('listTableSort');
+	TableSorter1.def_sort('listTableSort', 4);
+}
+</script>
+<input type="hidden" name="hid_edit_mac">
+<div class="page_title">@attach_device</div>
+<div id="main" class="main">
+<% table_header() %>
+<TR><td colspan=3><img src=/liteblue.gif width=100% height=12></td></TR>
+<TR>
+	<TD nowrap colspan=3 align=right>@access_control_url1
+	<script>
+        if(enable_bridge_flag == "1")
+                document.write('<a href=#><font color=grey><u>@access_control_url2</u></font></a>');
+        else
+                document.write('<a href=# onclick="goto_url(); return false;"><font color=blue><u>@access_control_url2</u></font></a>');
+        </script>	
+	@access_control_url3
+	</TD>
+</TR>
+<TR>
+	<TD width="40%" >&nbsp;</TD>
+	<TD>
+	<script>
+		var new_device_statue_by_default="<% cfg_get("new_device_statue_by_default") %>";
+
+		if( enable_block_device == "0" )
+		{
+			document.write("@acc_control: @acc_turned_off");
+		}
+		else
+		{
+			document.write("@acc_control: @acc_turned_on");
+			document.write("<br/>");
+			if( new_device_statue_by_default == "Block" )
+				document.write("@acc_general_rule: @block_connect");
+			else
+				document.write("@acc_general_rule: @allow_connect");
+		}
+	</script>
+	</TD>
+</TR>
+<TR>
+	<TD nowrap align=left>
+	<input class="short_common_gr_bt" type="button" name="edit" id="edit" value="@edit_mark" onClick='return edit_select_device(document.forms[0]);' disabled>
+	</TD>
+	<script>
+	if(top.is_ru_version == 1)
+		document.getElementsByName("edit")[0].className="common_gray_bt";
+	</script>
+	<TD nowrap align=right>
+	<input class="common_bt" type='button' name='refresh' value='@refresh_mark' onClick='location.href="QOS_device.htm";'>
+	</TD>
+</TR>
+<TR>
+	<TD nowrap colspan=3>
+		<TABLE class=tables border=1 cellpadding=2 cellspacing=0 width=100% id="listTableSort">
+			<thead>
+			<TR class=table_header>
+			<TH align=center width=5%></TH>
+			<TH align=center width=5% id="aorb_status" style="display:none;"><a href="#" class="subhead_acc_control">@stalist_Status</a></TH>
+			<TH nowrap align=center width=20%><a href="#" class="subhead_acc_control">@trigger_contype</a></TH>
+			<TH nowrap align=center abbr="str_text" width=30%><a href="#" class="subhead_acc_control">@lan_mark_name</a></TH>
+			<TH nowrap align=center width=20% abbr="ip_text"><a href="#" class="subhead_acc_control">@lan_mark_ip</a></TH>
+			<TH nowrap align=center width=20%><a href="#" class="subhead_acc_control">@qos_mac</a></TH>
+			</TR>
+			</thead>
+			<tbody class="koo">
+			<script>
+				var cf=document.forms[0];
+				var ip_str="-";
+				var name_str="-";
+
+				if(access_control_device_num > 0)
+				{
+					for(i=0;i<access_control_device_num;i++)
+					{
+						var str = eval ( 'access_control_device' + i );
+						var str_name = eval ( 'access_control_device_name' + i );
+						var each_info = str.split("*");
+
+						mac_addr[i]=each_info[2];
+						ip_addr[i]=each_info[1];
+						name_addr[i]=str_name;
+						prio_addr[i]="MEDIUM";
+
+						if(str_name=="")
+							name_str="-";
+						else
+							name_str=str_name.replace(/[ ]/g, "&nbsp;");
+
+						if(each_info[1]=="")
+							ip_str="-";
+						else
+							ip_str=each_info[1];
+
+						document.write('<tr><td nowrap align=center><input type="radio" name="sel_items" value="'+i+'" onclick="return select_device(mac_addr['+i+'], ip_addr['+i+'], name_addr['+i+'], prio_addr['+i+'])"></td>');
+						document.write('<td align=center name=aorb_content'+i+' style="display:none;">'+show_bora(each_info[0])+'</td>');
+						document.write("<td nowrap align=center>"+show_type(each_info[3])+"</td>");
+						document.write('<td class=device_name valign=middle title="@device_type: '+show_icon_name(each_info[5])+show_wlan_ssid(each_info[3])+'"><input type=hidden value='+name_str+' /><div style="float:left; text-align:left;">');
+						device_icon(each_info[5]);
+						document.write('</div><div style="float:right; text-align:right; line-height:44px;">'+name_str+'</div></td>');
+						document.write("<td nowrap align=center>"+ip_str+"</td>");
+						document.write("<td nowrap align=center>"+each_info[2]+"</td></tr>");
+					}
+				}
+			</script>
+			</tbody>
+		</table>
+	</td>
+</tr>
+</table>
+</div>
+<% help_box("1","_new_attach_device") %>
+</form>
+</body>
+</html>
+

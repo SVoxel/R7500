@@ -1,0 +1,425 @@
+<% http_header("style/form.css", "/funcs.js", "/jquery-1.7.2.min.js", "/streamboost.js") %>
+<% body_header("_new_attach_device", "QOS_edit_devices.htm", "select_qos_edit") %>
+<style type="text/css">
+.fl{float:left;}
+.dd{clear:both;margin:7px 0;width:100%;height:20px;}
+.outbar{border:0px;background:#fff;height:18px;width:65%;float:left;}
+.inbar{height:18px;display:block;}
+#up_down_img { background-image:url(/image/ookla_speed.jpg);background-repeat:no-repeat; width:300px; height:40px; font-weight:bold; font-size:15px; font-family:arial; }
+#downlink_speed { position:relative; color:#ffffff; z-indent:2; left:45px; top:10px;}
+#uplink_speed { position:relative; color:#ffffff; z-indent:3; left:115px; top:10px;}
+</style>
+<script language="javascript" type="text/javascript">
+
+
+function hisrect()
+{
+	this.pastNum=0;
+	this.pastData=[0,0,0,0,0,0];
+	this.averageData=averageData;
+	this.addData=addData;
+
+	function averageData()
+	{
+		var sumData=0;
+		var aver=0;
+		for(var i=0;i<6;i++)
+			sumData = (parseFloat(sumData)+parseFloat(this.pastData[i])).toFixed(2);
+
+		if(this.pastNum<6)
+			aver = sumData/this.pastNum;
+		else
+			aver = sumData/6;
+		return aver.toFixed(2);
+	}
+
+	function addData(data)
+	{
+		this.pastData[this.pastNum%6]=data;
+		this.pastNum++;
+	}
+
+}
+var hisrectList={};
+
+
+$.fn.band_width = function(name, options, totle) {
+	var settings=options;
+	var color="#00f";
+	var container = jQuery(this);
+	container.html('<dl id="linebar"></dl>');
+	var study_voteCount=0;
+	study_voteCount = parseFloat(totle).toFixed(2);
+
+	if(!hisrectList[name])
+		hisrectList[name]=new hisrect();
+	hisrectList[name].addData(settings[0].data);
+	averageData=hisrectList[name].averageData();
+
+	var study_votestr="";
+	var studyplay_present=(averageData/study_voteCount*100).toFixed(2);
+	if(studyplay_present>100.00)
+		studyplay_present=100.00;
+	if(studyplay_present>90.00)
+		color="#f00";
+	else
+		color="#00f";
+	study_votestr += '<dd class="dd"><div class="outbar"><div class="inbar" style="width:'+studyplay_present+'%;background:'+color+';"></div></div><div class="fl">&nbsp;&nbsp;&nbsp;&nbsp;'+averageData+'Mbps</div></dd>';
+	container.find('#linebar').html(study_votestr);
+}
+
+<% list_access_control_device("js") %>
+
+<% refresh_timestamp("show_application", "select_qos_edit") %>
+var ts='<% cfg_get("show_application") %>';
+var enable_block_device="<% cfg_get("enable_block_device") %>";
+var bandwidth_type="<% cfg_get("bandwidth_type") %>";
+
+var uplimit="<% cfg_get("uplimit") %>";
+var downlimit="<% cfg_get("downlimit") %>";
+var ookla_uplimit="<% cfg_get("ookla_uplimit") %>";
+var ookla_downlimit="<% cfg_get("ookla_downlimit") %>";
+var show_uplimit="";
+var show_downlimit="";
+var enable_bridge_flag="<% cfg_get("bridge_mode") %>";
+
+if(bandwidth_type == "0") {
+	show_uplimit=ookla_uplimit;
+	show_downlimit=ookla_downlimit;
+} else {
+	show_uplimit=uplimit;
+	show_downlimit=downlimit;
+}
+
+var uplink_value=show_uplimit*8/1000000;
+if(uplink_value==0)
+	uplink_value=1000.00;
+
+var downlink_value=show_downlimit*8/1000000;
+if(downlink_value==0)
+	downlink_value=1000.00;
+
+var mac_addr=new Array();
+var ip_addr=new Array();
+var name_addr=new Array();
+var prio_addr=new Array();
+
+function goto_url()
+{
+	location.href="access_control.htm";
+}
+
+function show_wlan_ssid(name)
+{
+	var wlan_ssid="";
+	if(name=="wired")
+		wlan_ssid="";
+	else if(name=="primary")
+		wlan_ssid="<br>@wlan_guest_ssid: "+wl_ssid;
+	else if(name=="guest")
+		wlan_ssid="<br>@wlan_guest_ssid: "+wlgl_ssid;
+	else if(name=="primary_an")
+		wlan_ssid="<br>@wlan_guest_ssid: "+wla_ssid;
+	else if(name=="guest_an")
+		wlan_ssid="<br>@wlan_guest_ssid: "+wlal_ssid;
+	else
+		wlan_ssid="";
+	return wlan_ssid;
+}
+
+var TableSorter1 = new TSorter(0);
+function loadvalue()
+{
+	if(enable_block_device == "0")
+	{
+		$("#aorb_status").hide();
+		$(".koo>tr>td:nth-child(2)").hide();
+	} else {
+		$("#aorb_status").show();
+		$(".koo>tr>td:nth-child(2)").show();
+	}
+	TableSorter1.init('tableSort');
+	TableSorter1.def_sort('tableSort', 5);
+
+	getDevices();
+	getTraffic();
+}
+var xmlHttp;
+var cf=document.forms[0];
+var ip_str="-";
+var name_str="-";
+
+var byMAC={};
+var prevTimestamp={};
+var prevDownValue={};
+var prevDownRate={};
+var prevUpValue={};
+var prevUpRate={};
+
+function getDevices()
+{
+	xmlHttp = createXMLHttpRequest();
+
+	xmlHttp.onreadystatechange = function()
+	{
+		if(xmlHttp.readyState == 4 && xmlHttp.status == 200)
+		{
+			var jobj = eval('('+xmlHttp.responseText+')');
+			updateDevice(jobj.device);
+			updateInfomation(jobj.traffic);
+		}
+	}
+	var url = "QOS_device_info.htm?ts=" + new Date().getTime();
+	xmlHttp.open("GET",url,true);
+	xmlHttp.send(null);
+	setTimeout("getDevices()", 6000);
+}
+
+function updateDevice(jobj)
+{
+
+	if( jobj.wl_ssid)
+	{
+		access_control_device_num = jobj.access_control_device_num;
+		wl_ssid = jobj.wl_ssid;
+		wlgl_ssid = jobj.wlgl_ssid;
+		wla_ssid = jobj.wla_ssid;
+		wlal_ssid = jobj.wlal_ssid;
+
+		for(var i=0; i < access_control_device_num; i++)
+		{
+			eval("access_control_device"+i+"=jobj.access_control_device"+i+";");
+			eval("access_control_device_name"+i+"=jobj.access_control_device_name"+i+";");
+		}
+		show_table_items();
+	}
+}
+
+function getTraffic()
+{
+	tHttp = createXMLHttpRequest();
+
+	tHttp.onreadystatechange = function()
+	{
+		if(tHttp.readyState == 4 && tHttp.status == 200)
+		{
+			var jobj = eval('('+tHttp.responseText+')');
+			updateInfomation(jobj);
+		}
+	}
+	var url = "/cgi-bin/ozker/api/flows?ts=" + new Date().getTime();
+	tHttp.open("GET",url,true);
+	tHttp.send(null);
+	setTimeout("getTraffic()", 1000);
+}
+
+function updateInfomation(jobj)
+{
+	var i, data, n, dRate, uRate, uid;
+	var curDownValue={};
+	var curUpValue={};
+	var curTimestamp={};
+	var curDownRate={};
+	var curUpRate={};
+
+	for( i in jobj.flows)
+	{
+		data = jobj.flows[i]
+			n = byMAC[data.mac.toUpperCase()];
+		if(n === undefined)
+			continue;
+
+		var j = data.uid;
+		curTimestamp[j] = data.epoch;
+		curDownValue[j] = data.down_bytes;
+		curUpValue[j] = data.up_bytes;
+		
+		if( prevTimestamp[j] === undefined || prevDownValue[j] === undefined || prevUpValue[j] === undefined)
+		{
+			prevTimestamp[j] = curTimestamp[j];
+			prevDownValue[j] = curDownValue[j];
+			prevUpValue[j] = curUpValue[j];
+			continue;
+		}
+		dtime = (parseFloat(curTimestamp[j]) - parseFloat(prevTimestamp[j]))*1000000 / 8;
+		if( dtime != 0 )
+		{
+			dRate = (parseFloat(curDownValue[j]) -parseFloat(prevDownValue[j]))/ dtime;
+			uRate = (parseFloat(curUpValue[j]) -parseFloat(prevUpValue[j]))/ dtime;
+			if(curDownRate[n] === undefined )
+				curDownRate[n] = dRate.toFixed(2);
+			else
+				curDownRate[n] = (parseFloat(curDownRate[n]) + dRate).toFixed(2);
+
+			if(curUpRate[n] === undefined)
+				curUpRate[n] = uRate.toFixed(2);
+			else
+				curUpRate[n] = (parseFloat(curUpRate[n]) + uRate).toFixed(2);
+		}
+
+		prevTimestamp[j] = curTimestamp[j];
+		prevDownValue[j] = curDownValue[j];
+		prevUpValue[j] = curUpValue[j];
+
+		if(curDownRate[n])
+			prevDownRate[n] = curDownRate[n];
+		if( curUpRate[n])
+			prevUpRate[n] = curUpRate[n]
+	}
+	update_band_width();
+}
+function update_band_width()
+{
+	for(i=0;i<access_control_device_num;i++)
+	{
+		$("#down"+i).value=prevDownRate[i];
+		$("#up"+i).value=prevUpRate[i];
+		$("div[name='y"+i+"']").band_width("y"+mac_addr[i], [{"data":prevDownRate[i]}],downlink_value);
+		$("div[name='z"+i+"']").band_width("z"+mac_addr[i], [{"data":prevUpRate[i]}],downlink_value);
+	}
+}
+
+
+
+
+</script>
+<input type="hidden" name="hid_mac">
+<input type="hidden" name="hid_edit_mac">
+<div class="page_title">@attach_device</div>
+<div id="main" class="main">
+<% table_header() %>
+<TR><td colspan=4><img src=/liteblue.gif width=100% height=12></td></TR>
+<TR>
+	<TD nowrap colspan=4 align=right>@access_control_url1
+	 <script>
+        if(enable_bridge_flag == "1")
+                document.write('<a href=#><font color=grey><u>@access_control_url2</u></font></a>');
+        else
+                document.write('<a href=# onclick="goto_url(); return false;"><font color=blue><u>@access_control_url2</u></font></a>');
+        </script>
+	@access_control_url3
+	</TD>
+</TR>
+<TR>
+	<TD align="center" colspan=4>
+	<script>
+		var new_device_statue_by_default="<% cfg_get("new_device_statue_by_default") %>";
+
+		if( enable_block_device == "0" )
+		{
+			document.write("@acc_control: @acc_turned_off");
+		}
+		else
+		{
+			document.write("@acc_control: @acc_turned_on");
+			document.write("<br/>");
+			if( new_device_statue_by_default == "Block" )
+				document.write("@acc_general_rule: @block_connect");
+			else
+				document.write("@acc_general_rule: @allow_connect");
+		}
+	</script>
+	</TD>
+</TR>
+<TR>
+	<TD nowrap align=left width="120px">
+	<input class="short_common_gr_bt" type="button" name="edit" value="@edit_mark" onClick='return edit_select_device(document.forms[0]);' disabled>
+	</TD>
+	<TD nowrap align=left id="up_down_img">
+	<script>
+		if(show_uplimit == "" || show_downlimit == "")
+			document.write("<span id=downlink_speed>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Mbps</span><span id=uplink_speed>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Mbps</span>");
+		else
+			document.write("<span id=downlink_speed>"+parseFloat(show_downlimit*8/1000000).toFixed(2)+" Mbps</span><span id=uplink_speed>"+parseFloat(show_uplimit*8/1000000).toFixed(2)+" Mbps</span>");
+	</script>
+	</TD>
+	<TD align="left" nowrap>
+		<b>@qos_message2</b>
+	</TD>
+	<TD nowrap align=right>
+	<input class="common_bt" type='button' name='refresh' value='@refresh_mark' onClick='location.href="QOS_device.htm";'>
+	</TD>
+</TR>
+<TR>
+	<TD nowrap colspan=4>
+		<TABLE class=tables border=1 cellpadding=2 cellspacing=0 width=100% id="tableSort">
+			<thead>
+			<TR class=table_header>
+			<TH align=center width=2%></TH>
+			<TH align=center width=3% id="aorb_status" style="display:none;"><a href="#" class="subhead_acc_control">@stalist_Status</a></TH>
+			<TH align=center width=8% abbr="str_text"><a href="#" class="subhead_acc_control">@qos_devpriority</a></TH>
+			<TH align=center width=10%><a href="#" class="subhead_acc_control">@trigger_contype</a></TH>
+			<TH align=center abbr="str_text" width=25%><a href="#" class="subhead_acc_control">@lan_mark_name</a></TH>
+			<TH width=26% abbr="float_text"><table><tr><td width=15%><img src="/image/down_arrow.png" width="23px;" height="23px;" /></td><td align=center><a href="#" class="subhead_acc_control">@bandwidth_down</a></td></tr></table></TH>
+			<TH width=26% abbr="float_text"><table><tr><td width=15%><img src="/image/up_arrow.png" width="23px;" height="23px;" /></td><td align=center><a href="#" class="subhead_acc_control">@bandwidth_up</a></td></tr></table></TH>
+			</TR>
+			</thead>
+			<tbody class="koo" id="devicesContainer">
+			<script>
+			function show_table_items()
+			{
+				$('#devicesContainer').empty();
+				var showstr="";
+				if(access_control_device_num > 0)
+				{
+					for(i=0;i<access_control_device_num;i++)
+					{
+						var str = eval ( 'access_control_device' + i );
+						var str_name = eval ( 'access_control_device_name' + i );
+						var each_info = str.split("*");
+
+						mac_addr[i]=each_info[2];
+						byMAC[each_info[2]]=i;
+						ip_addr[i]=each_info[1];
+						name_addr[i]=str_name;
+						prio_addr[i]=each_info[4];
+
+						if(str_name=="")
+							name_str="-";
+						else
+							name_str=str_name.replace(/[ ]/g, "&nbsp;");
+
+						if(each_info[1]=="")
+							ip_str="-";
+						else
+							ip_str=each_info[1];
+
+						showstr='<TR style="cursor:pointer;">';
+						showstr=showstr+'<td align=center style="cursor:default;"><input type="radio" name="sel_items" value="'+i+'" onclick="return select_device(mac_addr['+i+'], ip_addr['+i+'], name_addr['+i+'], prio_addr['+i+']);"></td>';
+
+						showstr=showstr+'<td align=center name=aorb_content'+i+' style="display:none;" onclick="return show_app(cf,mac_addr['+i+']);">'+show_bora(each_info[0])+'</td>';
+						showstr=showstr+'<td align=center onclick="return show_app(cf,mac_addr['+i+']);"><input type=hidden value='+show_pri_num(each_info[4])+' />'+show_priority(each_info[4])+'</td>';
+						showstr=showstr+'<td align=center onclick="return show_app(cf,mac_addr['+i+']);">'+show_type(each_info[3])+'</td>';
+						showstr=showstr+'<td class=device_name valign=middle title="@qos_mac: '+each_info[2]+'&#13@device_type: '+show_icon_name(each_info[5])+show_wlan_ssid(each_info[3])+'" onclick="return show_app(cf,mac_addr['+i+']);"><input type="hidden" value='+name_str+' /><div style="float:left; text-align:left;">';
+						showstr=showstr+device_icon(each_info[5]);
+						showstr=showstr+'</div><div style="float:right; text-align:right; line-height:22px;">'+name_str+'<br>'+ip_str+'</div></td>';
+						prevDownRate[i]=parseFloat(each_info[7]).toFixed(2);
+						prevUpRate[i]=parseFloat(each_info[6]).toFixed(2);
+						showstr=showstr+'<td nowrap onclick="return show_app(cf,mac_addr['+i+']);"><input type=hidden value='+prevDownRate[i]+'><div name=y'+i+'></div></td>';
+						showstr=showstr+'<td nowrap onclick="return show_app(cf,mac_addr['+i+']);"><input type=hidden value='+prevUpRate[i]+'><div name=z'+i+'></div></td></TR>';
+						$('#devicesContainer').append(showstr);
+					}
+				}
+	
+				if(enable_block_device == "0")
+				{
+					$(".koo>tr>td:nth-child(2)").hide();
+				} else {
+					$(".koo>tr>td:nth-child(2)").show();
+				}
+			}
+			show_table_items();
+			update_band_width();
+			</script>
+			</tbody>
+		</table>
+	</td>
+</tr>
+
+</table>
+</div>
+<% help_box("1","_new_attach_device") %>
+</form>
+</body>
+</html>
+

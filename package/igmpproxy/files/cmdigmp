@@ -1,0 +1,98 @@
+#!/bin/sh /etc/rc.common
+# Copyright (c) 2013 The Linux Foundation. All rights reserved.
+# Copyright (C) 2010-2012 OpenWrt.org
+
+CONFIG_FILE="/var/etc/igmpproxy.conf"
+PID_FILE="/var/run/igmpproxy.pid" #if the path/file changes, remember to modify snmp checking function
+
+SERVICE_DAEMONIZE=1
+SERVICE_WRITE_PID=1
+
+# igmpproxy supports both a debug mode and verbosity, which are very useful
+# when something isn't working.
+#
+# Debug mode will print everything to stdout instead of syslog. Generally
+# verbosity should NOT be set as it will quickly fill your syslog.
+#
+# Put any debug or verbosity options into IGMP_OPTS
+#
+# Examples:
+# OPTIONS="-d -v -v" - debug mode and very verbose, this will land in
+#                        stdout and not in syslog
+# OPTIONS="-v" - be verbose, this will write aditional information to syslog
+
+OPTIONS=""
+
+igmp_header() {
+	local quickleave
+	config_get_bool quickleave "$1" quickleave 0
+
+	config_get max_group "$1" max_group
+	[ -z "$max_group" ] && max_group=60
+	echo $max_group > /proc/sys/net/ipv4/igmp_max_memberships
+
+	mkdir -p /var/etc
+	rm -f $CONFIG_FILE
+	[ $quickleave -gt 0 ] && echo "quickleave" >> $CONFIG_FILE
+
+}
+
+igmp_add_phyint() {
+	local lan_ifname=`/bin/config get lan_ifname`
+	local wan_ifname=`/bin/config get wan_ifname`
+	local wan_hwifname=eth0
+	local wan_proto=`/bin/config get wan_proto`
+	local current_language=`/bin/config get GUI_Region`
+	case "$wan_proto" in
+		static|dhcp)
+			wan_ifname_upstream=$wan_ifname
+			;;
+		pppoe|pptp|l2tp)
+			if [ $current_language = "Russian" ]; then
+				wan_ifname_upstream=$wan_hwifname
+			else
+				wan_ifname_upstream=ppp0
+			fi
+			;;
+		*)
+			wan_ifname_upstream=$wan_ifname
+	esac
+
+	echo "phyint $wan_ifname_upstream upstream  ratelimit 0  threshold 1" >> $CONFIG_FILE
+	echo "" >> $CONFIG_FILE
+
+	echo "phyint $lan_ifname downstream  ratelimit 0  threshold 1" >> $CONFIG_FILE
+	echo "" >> $CONFIG_FILE
+}
+
+start() {
+	killall igmpproxy
+	local igmp_enable=`/bin/config get wan_endis_igmp`
+	if [ "$igmp_enable" = "1" ]; then
+		echo 2 > /proc/sys/net/ipv4/conf/all/force_igmp_version
+		config_load igmpproxy
+		config_foreach igmp_header igmpproxy
+		igmp_add_phyint
+
+		touch $PID_FILE
+		ebt_239=`ebtables -L | grep  "239.255.255.250"`
+		ebt_224=`ebtables -L | grep  "224.0.1.0-239.255.255.255"`
+		if [ "x$ebt_239" = "x" ]; then
+			ebtables -A OUTPUT -o eth0 -p ipv4 --ip-dst 239.255.255.250 -j ACCEPT
+		fi
+		if [ "x$ebt_224" = "x" ]; then
+			ebtables -A OUTPUT -o eth0 -p ipv4 --ip-dstrange 224.0.1.0-239.255.255.255 -j DROP
+		fi
+		service_start /sbin/igmpproxy $OPTIONS $CONFIG_FILE
+	fi
+}
+
+stop() {
+	echo "Shutting down igmpproxy!" > /dev/console
+	killall igmpproxy
+	rm -f ${PID_FILE}
+	service_stop /sbin/igmpproxy
+	ebtables -D OUTPUT -o eth0 -p ipv4 --ip-dst 239.255.255.250 -j ACCEPT
+	ebtables -D OUTPUT -o eth0 -p ipv4 --ip-dstrange 224.0.1.0-239.255.255.255 -j DROP
+}
+

@@ -1,0 +1,13 @@
+Package: qca-wpa-cli
+Version: 10.2.2.39.1-1
+Depends: libc, qca-wpa-supplicant
+Provides: 
+Source: package/qca-hostap
+Section: QCA
+Status: unknown ok not-installed
+Essential: no
+Priority: optional
+Maintainer: Qualcomm Atheros
+Architecture: ipq806x
+Installed-Size: 25055
+Description:  WPA Supplicant command line interface

@@ -1,0 +1,89 @@
+<% http_header("style/form.css", "/funcs.js") %>
+<BODY bgcolor=#ffffff onLoad="loadhelp('_auto_upgrade');loadvalue();">
+
+<% refresh_timestamp("download_confile") %>
+<% hijack_language() %>
+<div id="main" class="main">
+<TABLE width=100% border=0 cellpadding=0 cellspacing=3>
+<script>
+
+if(top.location.href.indexOf("BRS_index.htm") > 0)
+	document.write('<TR><TD colSpan=2><H1>'+wait_upg_head+'</H1></TD></TR>');
+else
+	document.write('<TR><TD colSpan=2><H1>$wait_upg_head</H1></TD></TR>');
+</script>
+<TR><TD colSpan=2></TD></TR>
+$bluebar
+<TR><TD colSpan=2></TD></TR>
+<script>
+
+if(top.location.href.indexOf("BRS_index.htm") > 0)
+	document.write('<TR id="pls_wait"><TD><BR>'+wizard_pls_wait+'<BR></TD></TR>');
+else
+	document.write('<TR id="pls_wait"><TD><BR>$wizard_pls_wait<BR></TD></TR>');
+</script>
+<script>
+parent.charcount=0;
+var wan_status=<% detwan_valid() %>;
+var status=<% autoup_status() %>;
+
+function loadvalue()
+{
+	detec_status();
+}
+
+function detec_status()
+{
+	if (wan_status == 1)
+	{
+		if(top.location.href.indexOf("BRS_index.htm") > 0){
+			status = top.content_frame.auto_search_frame.status;
+		}
+		else
+			status = top.formframe.auto_search_frame.status;
+		if (status == 9999)
+			location.href="UPG_check_version.htm";
+		else if (status >= 10000){
+			location.href="AUTO_upgrade_noversion.htm";
+		}
+		else
+		{
+			//document.write("$wizard_pls_wait");
+			//document.getElementById("pls_wait").style.display="";
+			setTimeout("detec_status();",1000);
+		}
+	}
+	else
+	{
+		if(top.location.href.indexOf("BRS_index.htm") != -1||(top.location.href.indexOf("adv_index.htm") != -1&& top.setup_wizard_flag == 1))
+			location.href="BRS_hdd_success.htm";
+		else
+			location.href="AUTO_upgrade_no_internet.htm";
+	}
+	
+	if(top.location.href.indexOf("BRS_index.htm") == -1)
+		top.topframe.location.href="top.html";
+}
+function click_cancel()
+{
+	location.href="UPG_cancel.htm";
+}
+</script>
+
+
+$bluebar
+
+<TR>
+<script>
+
+if(top.location.href.indexOf("BRS_index.htm") > 0)
+	document.write('<TD nowrap align=center> <input type=\'button\' name=\'cancel\'  value='+cancel_mark+' onclick=\'click_cancel();\'></TD>');
+else
+	document.write('<TD nowrap align=center> <input type=\'button\' name=\'cancel\' value=\'$cancel_mark\' onclick=\'click_cancel();\'></TD>');
+</script>
+</TR>
+</TABLE>
+<iframe name="auto_search_frame" src="autoup_get_status.htm" allowtransparency="true" scrolling="no" frameborder="0" ></iframe>
+</div>
+</BODY>
+</HTML>

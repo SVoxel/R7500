@@ -1,0 +1,43 @@
+#!/bin/sh
+
+[ -z "$1" ] && {
+    echo "$0 [config|normal]"
+    exit 1
+}
+
+
+if_ip="1.1.1.1"
+qt_pcie_ip_conf=/etc/qcsapi_target_ip.conf
+in_normal_mode=0
+network=lan
+device=host0
+mode=$1
+
+if [ ! -f $qt_pcie_ip_conf ]; then
+    echo "1.1.1.2" > $qt_pcie_ip_conf
+fi
+
+if eval "brctl show br-$network | grep $device" 2>/dev/null > /dev/null; then
+    in_normal_mode=1
+fi
+
+case "$mode" in
+    config)
+        [ "$in_normal_mode" = "1" ] && {
+            brctl delif "br-$network" $device
+            ifconfig $device $if_ip up
+            echo "Entering $mode mode"
+        }
+        ;;
+    normal)
+        [ "$in_normal_mode" = "0" ] && {
+            ifconfig $device 0.0.0.0 up
+            brctl addif "br-$network" $device
+            echo "Entering $mode mode"
+        }
+        ;;
+    *)
+        echo "$0 [config|normal]"
+        exit 1
+        ;;
+esac

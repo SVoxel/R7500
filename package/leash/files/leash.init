@@ -1,0 +1,39 @@
+#!/bin/sh
+
+. ${STREAMBOOST_CFGDIR:-/etc/appflow}/rc.appflow
+
+# standard settings - accept overrides from the calling environment
+BINARY="dhcp-lease-filter"
+DISPLAY_NAME="leash"
+LOGGER="logger -p daemon.info -t ${DISPLAY_NAME}"
+PIDFILE="${RUNDIR}/${BINARY}.pid"
+
+INFILE="/tmp/dhcp.leases"
+OUTFILE="${RUNDIR}/dhcp.leases"
+CHECK_INTERVAL=2
+
+DAEMON_BIN="${BINDIR}/${BINARY}"
+EXTRA_COMMANDS=status
+
+export LOGGER PIDFILE DISPLAY_NAME LAN_IFACE
+
+CMDLINE="${INFILE} ${OUTFILE} ${CHECK_INTERVAL}"
+
+start() {
+	# TODO: move WIFI_IFACES to streamboost.sys.conf if needed
+	WIFI_IFACES=$(iwconfig 2>/dev/null | grep -v '^ ' | grep -v '^$' | cut -d ' ' -f 1)
+	export WIFI_IFACES
+
+	${BINDIR}/${BINARY} ${CMDLINE} >/dev/null 2>&1 "$@" &
+}
+
+stop() {
+	killall ${BINARY} 2>/dev/null
+	killall sleep 2>/dev/null
+        while status >/dev/null 2>&1 ; do
+                sleep 1
+        done
+}
+
+action "$@"
+exit $?

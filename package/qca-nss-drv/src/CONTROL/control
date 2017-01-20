@@ -1,0 +1,13 @@
+Package: kmod-qca-nss-connmgr
+Version: 3.4.0-1
+Depends: kernel (=3.4.0-1-3857f46b13c2f0a6145d619d6abea14d), kmod-qca-nss-drv, iptables-mod-extra
+Provides: 
+Source: package/qca-nss-drv
+Section: kernel
+Status: unknown ok not-installed
+Essential: no
+Priority: optional
+Maintainer: OpenWrt Developers Team <openwrt-devel@openwrt.org>
+Architecture: ipq806x
+Installed-Size: 22712
+Description:  Kernel driver for NSS (connection manager)

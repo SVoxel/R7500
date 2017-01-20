@@ -1,0 +1,6 @@
+DAAPParser.c : DAAP.g
+./DAAP.tokens : DAAP.g
+DAAPParser.h : DAAP.g
+DAAPLexer.c : DAAP.g
+DAAPLexer.h : DAAP.g
+ANTLR_PRODUCTS += DAAPParser.c ./DAAP.tokens DAAPParser.h DAAPLexer.c DAAPLexer.h 

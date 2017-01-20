@@ -1,0 +1,14 @@
+#!/bin/sh /etc/rc.common
+START=80
+boot() {
+       if [ "$($CONFIG get ap_mode)" = "1" -o "$($CONFIG get bridge_mode)" = "1" ]; then
+           echo "start wlan in AP/Bridge mode later"
+           exit 0
+       fi
+       sleep 5
+       wlan down;
+       if eval "type update-wifi" 2>/dev/null >/dev/null; then
+           update-wifi
+       fi
+       wlan up
+}

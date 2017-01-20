@@ -1,0 +1,13 @@
+Package: qca-hostap
+Version: 10.2.2.39.1-1
+Depends: libc, kmod-qca-wifi, qsdk-wifi-script
+Provides: 
+Source: package/qca-hostap
+Section: QCA
+Status: unknown ok not-installed
+Essential: no
+Priority: optional
+Maintainer: Qualcomm Atheros
+Architecture: ipq806x
+Installed-Size: 224926
+Description:  This package contains the IEEE 802.1x/WPA/EAP/RADIUS Authenticator.

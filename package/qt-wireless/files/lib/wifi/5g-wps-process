@@ -1,0 +1,313 @@
+#!/bin/sh
+#
+# Quantenna Inc..
+#
+
+# TODO: Added auth and send config case when QTN support
+
+command=/bin/config
+qca_hostapd_config_file=/var/run/hostapd-ath0.conf
+local WPS_STATE=
+rm /tmp/QT_WPS
+LED_off='/sbin/ledcontrol -n wps -c green -s off'
+LED_on='/sbin/ledcontrol -n wps -c green -s on'
+ENABLE_11G=`/bin/config get endis_wl_radio`
+ENABLE_11A=`/bin/config get endis_wla_radio`
+SECURITY_TYPE_11G=`/bin/config get wl_sectype`
+SECURITY_TYPE_11A=`/bin/config get wla_sectype`
+
+wps_blink_open()
+{
+    local blinked=0
+    # Don't blink WPS led if 2.4G already blink
+    for pid in `ps | grep -e 'hotplug-call wps' | awk '{print $1}'`; do
+        if [ -d /proc/$pid ]; then
+            is_blink_led=`cat /proc/$pid/environ | grep -e 'ACTION=BLINK_LED'`
+            if [ -n "$is_blink_led" ]; then
+                blinked=1
+            fi
+        fi
+    done
+
+    [ "$blinked" = "0" ] && ACTION="BLINK_LED" LED_STATE="LED_INPROGRESS" DURATION=120 INTERFACE=ath1 /sbin/hotplug-call wps &
+}
+
+wps_blink_close()
+{
+    # Kill all hotplug-call for close blink WPS led
+    for pid in `ps | grep -e 'hotplug-call wps' | awk '{print $1}'`; do
+        if [ -d /proc/$pid ]; then
+            is_blink_led=`cat /proc/$pid/environ | grep -e 'ACTION=BLINK_LED'`
+            if [ -n "$is_blink_led" ]; then
+                kill -9 $pid
+            fi
+            fi
+    done
+
+    # turn on WPS led after disable blink
+    /sbin/ledcontrol -n wps -c green -s on
+}
+
+wps_process_cancel()
+{
+    # This is workaround for wps cancel
+    # after disable and enable wps, the wps state will be reset to 2
+    # therefore, set wps state again
+    unconfig=`qcsapi_sockrpc get_wps_configured_state wifi0 | grep 'not'`
+    if [ -n "$unconfig" ]; then
+        wps_state=1
+    else
+        wps_state=2
+    fi
+
+    qcsapi_sockrpc wps_cancel wifi0
+
+    qcsapi_sockrpc set_wps_configured_state wifi0 $wps_state
+    lock_state=`qcsapi_sockrpc get_wps_param wifi0 ap_setup_locked`
+    pid=`pidof 5g-ap-pin-process`
+    if [ "$lock_state" = "0" -a "$pid" = "" ]; then
+        /lib/wifi/5g-ap-pin-process &
+    fi
+}
+
+wps_done()
+{
+    # delete 2.4G WPS process
+    hostapd_cli -i ath0 -p /var/run/hostapd-wifi0 wps_cancel
+
+    # success
+    WPS_STATE=1
+}
+
+set_config()
+{
+    uci_prefix=$1
+    if [ "$uci_prefix" = "wlg" ]; then
+        dni_prefix="wl"
+    else
+        dni_prefix="wla"
+    fi
+
+    local tmp_wpa=$2
+    local tmp_wpa_passphrase=$3
+    local tmp_ssid=$4
+    local type=$5
+
+    case "$tmp_wpa" in
+        0)
+            # None security
+            $command set ${dni_prefix}_sectype=1
+            uci set wireless.${uci_prefix}.encryption=none
+            uci delete wireless.wlg.key
+            ;;
+        2)
+            # WPA2-PSK [AES]
+            $command set ${dni_prefix}_sectype=4
+            $command set ${dni_prefix}_wpa2_psk="$tmp_wpa_passphrase"
+            $command set ${dni_prefix}_sec_wpaphrase_len="$(echo -n $tmp_wpa_passphrase|wc -c)"
+            uci set wireless.${uci_prefix}.encryption=psk2
+            uci set wireless.${uci_prefix}.key="$tmp_wpa_passphrase"
+            ;;
+        3)
+            # WPA-PSK [TKIP] + WPA2-PSK [AES]
+            $command set ${dni_prefix}_sectype=5
+            $command set ${dni_prefix}_wpas_psk="$tmp_wpa_passphrase"
+            $command set ${dni_prefix}_sec_wpaphrase_len="$(echo -n $tmp_wpa_passphrase|wc -c)"
+            uci set wireless.${uci_prefix}.encryption=psk_mixed
+            uci set wireless.${uci_prefix}.key="$tmp_wpa_passphrase"
+            ;;
+    esac
+
+    if [ "x$tmp_ssid" != "x" ]; then
+        if [ "$uci_prefix" = "wlg" ]; then
+            if [ "$type" != "AP_PIN" ]; then
+                tmp_2G_ssid=$(echo $tmp_ssid | sed  -e 's/NTGR-5G_/NTGR-2.4G_/g')
+            else
+                tmp_2G_ssid="$tmp_ssid-2.4G"
+            fi
+            $command set ${dni_prefix}_ssid="$(echo "$tmp_2G_ssid")"
+            uci set wireless.${uci_prefix}.ssid="$(echo "$tmp_2G_ssid")"
+        else
+            $command set ${dni_prefix}_ssid="$(echo "$tmp_ssid")"
+            uci set wireless.${uci_prefix}.ssid="$(echo "$tmp_ssid")"
+        fi
+    fi
+
+    # WPS is in configured state now
+    $command set ${dni_prefix}_wps_status=5
+    uci set wireless.${uci_prefix}.wps_state=2
+
+    $command commit
+    uci commit
+}
+
+set_hostapd_config_for_qca()
+{
+    [ -f "$qca_hostapd_config_file" ] || return
+
+    local tmp_wpa=$1
+    local tmp_wpa_passphrase=$2
+    local tmp_ssid=$3
+    local type=$4
+
+    sed -i '/^wpa/d' $qca_hostapd_config_file
+    sed -i '/^ssid/d' $qca_hostapd_config_file
+    sed -i '/^wps_state/d' $qca_hostapd_config_file
+
+    case "$tmp_wpa" in
+        0)
+            # None security
+            echo "wpa=0" >> $qca_hostapd_config_file
+            ;;
+        2)
+            # WPA2-PSK [AES]
+            echo "wpa=2" >> $qca_hostapd_config_file
+            echo "wpa_pairwise=CCMP" >> $qca_hostapd_config_file
+            echo "wpa_key_mgmt=WPA-PSK" >> $qca_hostapd_config_file
+            echo "wpa_passphrase=$tmp_wpa_passphrase" >> $qca_hostapd_config_file
+            ;;
+        3)
+            # WPA-PSK [TKIP] + WPA2-PSK [AES]
+            echo "wpa=3" >> $qca_hostapd_config_file
+            echo "wpa_pairwise=CCMP TKIP" >> $qca_hostapd_config_file
+            echo "wpa_key_mgmt=WPA-PSK" >> $qca_hostapd_config_file
+            echo "wpa_passphrase=$tmp_wpa_passphrase" >> $qca_hostapd_config_file
+            ;;
+    esac
+
+    if [ "x$tmp_ssid" != "x" ]; then
+        if [ "$type" != "AP_PIN" ]; then
+            tmp_2G_ssid=$(echo $tmp_ssid | sed  -e 's/NTGR-5G_/NTGR-2.4G_/g')
+        else
+            tmp_2G_ssid="$tmp_ssid-2.4G"
+        fi
+        echo "ssid=$tmp_2G_ssid" >> $qca_hostapd_config_file
+    fi
+
+    # WPS is in configured state now
+    echo "wps_state=2" >> $qca_hostapd_config_file
+
+    test -f /var/run/wifi-ath0.pid || return
+    kill $(cat /var/run/wifi-ath0.pid)
+    hostapd -P /var/run/wifi-ath0.pid -B /var/run/hostapd-ath0.conf
+    hostapd_cli -i ath0 -P /var/run/hostapd_cli-ath0.pid -a /lib/wifi/wps-hostapd-update-uci -p /var/run/hostapd-wifi0 -B
+}
+
+case "$ACTION" in
+    SET_STATE)
+        pid=`pidof 5g-ap-pin-process`
+        [ -n "$pid" ] && kill -9 $pid
+
+        wps_blink_open
+
+         # if unconfig state, need push random ssid and key to 2.4G
+        start_unconfig=`qcsapi_sockrpc get_wps_configured_state wifi0 | grep 'not'`
+
+        while :; do
+            # WPS_STATE=2 is only able to be set when /tmp/wps_process_state is "start".
+            if [ "$WPS_STATE" != "2" -o "$(/bin/cat /tmp/wps_process_state)" = "start" ]; then
+                set_wps_state=1
+
+                qt_state=`qcsapi_sockrpc get_wps_state wifi0 | cut -d" " -f1`
+                case $qt_state in
+                    0)  # 5G WPS init
+                        # no WPS process start or delete by 2.4G WPS or WPS done with unconfig WPS
+                        wps_done_unconfig=`qcsapi_sockrpc get_wps_configured_state wifi0 | grep 'not'`
+                        if [ -n "$start_unconfig" ] && [ -z "$wps_done_unconfig" ]; then
+                            wps_done
+                            qt_state=2
+                        else
+                            set_wps_state=0
+                        fi
+                        ;;
+                    1)  # 5G WPS start
+                        # noting to do, don't set GUI state
+                        set_wps_state=0
+                        ;;
+                    2)  # 5G WPS success
+                        wps_done
+                        ;;
+                    4)  # 5G wps timeout
+                        wps_process_cancel
+                        WPS_STATE=0
+                        ;;
+                    6)  # M2 send config
+                        # We cannot find auth state now.
+                        # Therefore, add auth into send config case
+                        # delete 2.4G WPS process
+                        hostapd_cli -i ath0 -p /var/run/hostapd-wifi0 wps_cancel
+
+                        # auth
+                        WPS_STATE=2
+                        echo "$WPS_STATE" > /tmp/wps_process_state
+                        sleep 1
+
+                        # send config
+                        WPS_STATE=3
+                        ;;
+                    *)  # noting to do, don't set GUI state
+                        set_wps_state=0
+                        ;;
+                esac
+                echo "$qt_state" >> /tmp/QT_WPS
+                [ "$set_wps_state" = "1" ] && echo "$WPS_STATE" > /tmp/wps_process_state
+                [ "$qt_state" = "0" -o "$qt_state" = "2" -o "$qt_state" = "4" ] && break
+            fi
+            sleep 1
+        done
+
+        if [ "$qt_state" = "2" ]; then
+            # QTN-V36.6.0.3 cannot alway get correct wireless setting right now after WPS done
+            # This is workaround for delay 3s
+            sleep 3
+
+            MAC=`qcsapi_sockrpc get_wps_param wifi0 last_wps_client`
+            [ -n "$MAC" ] && $command set macAddr="$MAC"
+            # TODO: need QTN support client name
+            NAME=`qcsapi_sockrpc get_wps_param wifi0 last_wps_client_devname`
+            [ -n "$NAME" ] && $command set client_name="$NAME"
+
+                if [ -n "$start_unconfig" ]; then
+                    authproto=`qcsapi_sockrpc get_beacon wifi0`
+                    if [ "$authproto" = "Basic" ]; then
+                        tmp_wpa=0
+                    elif [ "$authproto" = "11i" ]; then
+                        tmp_wpa=2
+                    elif [ "$authproto" = "WPAand11i" ]; then
+                        tmp_wpa=3
+                    fi
+                    tmp_wpa_passphrase=`qcsapi_sockrpc get_passphrase wifi0 0`
+                    tmp_ssid=`qcsapi_sockrpc get_SSID wifi0`
+
+                    set_config wlg "$tmp_wpa" "$tmp_wpa_passphrase" "$tmp_ssid"
+                    set_config wla "$tmp_wpa" "$tmp_wpa_passphrase" "$tmp_ssid"
+                    set_hostapd_config_for_qca "$tmp_wpa" "$tmp_wpa_passphrase" "$tmp_ssid"
+                fi
+
+            wps_blink_close
+            [ "${ENABLE_11G}" = "1" -o "${ENABLE_11A}" = "1" ] && [ "${SECURITY_TYPE_11G}" -gt "1" -o "${SECURITY_TYPE_11A}" -gt "1" ] && eval ${LED_on} || eval ${LED_off}
+            rm /tmp/wps_start_by_2g
+            lock_state=`qcsapi_sockrpc get_wps_param wifi0 ap_setup_locked`
+            pid=`pidof 5g-ap-pin-process`
+            if [ "$lock_state" = "0" -a "$pid" = "" ]; then
+                /lib/wifi/5g-ap-pin-process &
+            fi
+        fi
+        ;;
+    STOP_WPS)
+        wps_process_cancel
+        wps_blink_close
+        ;;
+    SET_CONFIG)
+        set_config wlg "$TMP_WPA" "$TMP_WPA_PASSPHRASE" "$TMP_SSID" "$TYPE"
+        set_config wla "$TMP_WPA" "$TMP_WPA_PASSPHRASE" "$TMP_SSID" "$TYPE"
+        set_hostapd_config_for_qca "$TMP_WPA" "$TMP_WPA_PASSPHRASE" "$TMP_SSID" "$TYPE"
+
+        # wps led cannot control from 5g hostapd directly
+        # this is special case for enable wps led
+        /sbin/ledcontrol -n wps -c green -s on
+        ;;
+    CANCEL_WPS)
+        wps_process_cancel
+        ;;
+esac

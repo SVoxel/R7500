@@ -1,0 +1,52 @@
+#!/bin/sh 
+
+CONFIG=/bin/config
+PROG=/usr/sbin/openvpn
+
+generate_client_conf_file(){
+	port=$($CONFIG get vpn_serv_port)
+	proto=$($CONFIG get vpn_serv_type)
+
+	if [ "$($CONFIG get endis_ddns)" = "1" ]; then
+		host_name=$($CONFIG get sysDNSHost)
+	else
+		static_ip=$($CONFIG get wan_ipaddr)
+	fi
+	if [ $1 = "windows" ]; then
+		dev_node="dev-node NETGEAR-VPN"
+	else
+		dev_node=";dev-node NETGEAR-VPN"
+	fi
+	cat << EOF
+client
+dev tap
+proto $proto
+$dev_node
+remote $host_name $static_ip $port
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+ca ca.crt
+cert client.crt
+key client.key
+cipher AES-128-CBC
+comp-lzo
+verb 5
+EOF
+}
+
+compress()
+{
+	OPENVPN_CONF_DIR=/tmp/openvpn
+	generate_client_conf_file windows > $OPENVPN_CONF_DIR/client.ovpn
+	generate_client_conf_file nonwindows > $OPENVPN_CONF_DIR/client.conf
+	
+	# cpmpress ca.crt.client.crt,client.key and client.conf 
+	cd $OPENVPN_CONF_DIR
+	zip  windows.zip ca.crt client.crt client.key client.ovpn
+	zip  nonwindows.zip ca.crt client.crt client.key client.conf
+}
+
+generate_client_conf_file
+compress

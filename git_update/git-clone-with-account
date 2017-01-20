@@ -1,0 +1,18 @@
+#!/usr/bin/expect --
+if { $argc != 5 } {
+	send_user "usage: git-clone-with-account server username password remote local\n"
+	send_user "usage: git-clone-with-account dniserver username 123456 /usr/local/dni-git/linux-2.4.x.git linux-2.4.x.git\n"
+	exit
+}
+ 
+set timeout 3600
+set server [lindex $argv 0]
+set username [lindex $argv 1]
+set password [lindex $argv 2]
+set remote [lindex $argv 3]
+set local [lindex $argv 4]
+
+spawn git clone ssh://$username@$server$remote $local
+expect "$username@$server's password:"
+send "$password\r"
+expect "%$"

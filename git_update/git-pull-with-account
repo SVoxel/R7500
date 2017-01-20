@@ -1,0 +1,16 @@
+#!/usr/bin/expect --
+if { $argc != 3 } {
+	send_user "usage: git-pull-with-account server username password\n"
+	send_user "usage: git-pull-with-account dniserver yourname 123456\n"
+	exit
+}
+
+set timeout 3600
+set server [lindex $argv 0]
+set username [lindex $argv 1]
+set password [lindex $argv 2]
+
+spawn git-pull
+expect "$username@$server's password:"
+send "$password\r"
+expect "%$"

@@ -1,0 +1,134 @@
+#!/bin/sh
+
+. ${STREAMBOOST_CFGDIR:-/etc/appflow}/rc.appflow
+
+#
+# Environment config
+#
+BINARY="drflocs"
+NAME=${BINARY}
+DISPLAY_NAME=drflocs
+
+#
+# Redis output channels config
+#
+REDIS_MAC_TO_IP_CHAN="nodes.ipaddr.drflocs"
+
+#
+# Drflocs config
+#
+# classification messages output path
+FIFO_TO_POLICY_ENGINE="${RUNDIR}/${BINARY}_out"
+
+# monitored interface
+INTERFACE="$LAN_IFACE"
+
+# path to wopr.yaml
+if [ -e "${RUNDIR}/wopr.yaml" ]; then
+	WOPRDEF_PATH="${RUNDIR}/wopr.yaml"
+else
+	WOPRDEF_PATH="${CFGDIR}/wopr.yaml"
+fi
+
+# pidfile written during daemonization
+PIDFILE="${RUNDIR}/${BINARY}.pid"
+
+# path to drflocs binary
+DRFLOCS_BIN="${BINDIR}/${BINARY}"
+
+# max number of tracked 5-tuples
+MAX_CONNECTIONS=16384
+
+# max number of connections that drflocs can actively be classifying
+MAX_FINGERPRINTS=1024
+
+# timeouts specified in seconds
+MAX_CONNECTION_TIMEOUT=120
+TCP_TIMEOUT=120
+UDP_TIMEOUT=60
+
+# if the debug file exists, drflocs is not started at boot
+KROUTER_DEBUG_FILE=${KROUTER_DEBUG_FILE:-"/etc/krouter_debug"}
+
+# Format the command line parameters
+CMDLINE_OPTS="\
+--daemon \
+--run-dir=${RUNDIR} \
+--pid-file=${PIDFILE} \
+--enable-offload \
+--redis \
+--redis-macip=${REDIS_MAC_TO_IP_CHAN} \
+-i ${INTERFACE} \
+--fcap=${FCAP_CMD_FIFO} \
+-w ${WOPRDEF_PATH} \
+--con-limit=${MAX_CONNECTIONS} \
+--cls-limit=${MAX_FINGERPRINTS} \
+--max-timeout=${MAX_CONNECTION_TIMEOUT} \
+--tcp-timeout=${TCP_TIMEOUT} \
+--udp-timeout=${UDP_TIMEOUT}"
+
+#
+# Functions
+#
+
+# drflocs won't start unless $IFACE has an ip address
+# wait for the ip address here
+wait_for_iface() {
+	while ! ifconfig ${INTERFACE} | grep "inet addr" > /dev/null
+	do
+		echo "waiting for ${INTERFACE}"
+		sleep 1
+	done
+}
+
+start() {
+	wait_for_iface
+
+	[ ! -d "${RUNDIR}" ] && {
+		mkdir ${RUNDIR}
+	}
+
+	[ ! -e "${FIFO_TO_POLICY_ENGINE}" ] && {
+		mkfifo ${FIFO_TO_POLICY_ENGINE}
+	}
+
+	[ -x ${DRFLOCS_BIN} ] || {
+		echo "${BINARY} not found: ${DRFLOCS_BIN}"
+		exit 2
+	}
+
+	[ "${FCAP_CMD_FIFO}" != "" -a ! -e "${FCAP_CMD_FIFO}" ] && {
+		mkfifo ${FCAP_CMD_FIFO}
+	}
+
+	echo -n "Starting ${NAME}: "
+	${DRFLOCS_BIN} ${CMDLINE_OPTS} "$@"
+	retval=$?
+	echo
+	return ${retval}
+}
+
+boot() {
+	if [ -n "${KROUTER_DEBUG_FILE}" ] && [ -e "${KROUTER_DEBUG_FILE}" ]
+	then
+		# If the debug file is present, don't start
+		echo "debug mode requested, drflocs refusing to start"
+	else
+		start "$@"
+	fi
+}
+
+stop() {
+	[ -f "${PIDFILE}" ] && {
+		echo -n "Stopping ${NAME}: "
+		kill -TERM $(cat ${PIDFILE})
+		retval=$?
+		echo
+		[ ${retval} -eq 0 ] && rm -f ${PIDFILE}
+		return ${retval}
+	}
+	return 0
+}
+
+action "$@"
+exit $?

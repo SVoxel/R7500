@@ -1,0 +1,42 @@
+#!/bin/sh
+
+command=/bin/config
+failure_num_file=/tmp/ap_pin_failure_num_file
+
+check_ap_lock_down()
+{
+    attack_check=`$command get wps_pin_attack_check`
+    attack_num=`$command get wps_pin_attack_num`
+
+    [ "$attack_check" = "0" -o "$failure_num" -lt "$attack_num" ] && return
+
+    for dir in /var/run/hostapd-*; do
+        [ -d "$dir" ] || continue
+        for vap_dir in $dir/ath*; do
+            [ -r "$vap_dir" ] || continue
+            hostapd_cli -i "${vap_dir#"$dir/"}" -p "$dir" ap_setup_locked 1
+        done
+    done
+
+    env -i PROG_SRC=athr-hostapd ACTION=BLINK_LED LED_STATE=LED_AP_LOCK PROTO=static /sbin/hotplug-call wps &
+
+    #lock 5G wps ap pin, this is special case for QTN
+    qcsapi_sockrpc set_wps_param wifi0 ap_setup_locked 1
+
+    $command set wps_lock_down=1
+    $command commit
+
+    uci set wireless.wla.ap_setup_locked=1
+    echo 0 > $failure_num_file
+}
+
+case "$EVENT" in
+    ADD_FAILURE_NUM)
+        failure_num=`cat $failure_num_file`
+        failure_num=$(($failure_num+1))
+        echo $failure_num > $failure_num_file
+        env -i PROG_SRC=athr-hostapd ACTION=BLINK_LED LED_STATE=LED_PIN_INTRUSION PROTO=static /sbin/hotplug-call wps &
+        check_ap_lock_down
+        ;;
+esac
+    

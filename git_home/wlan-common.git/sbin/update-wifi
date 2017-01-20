@@ -1,0 +1,680 @@
+#!/bin/sh
+
+echo "" > /etc/config/wireless
+. /etc/dni-wifi-config
+
+get_intf_onoff()
+{
+    parent_radio=`echo $2 | awk -F _ '{print $1}'`
+    eval wl_onoff=\$`echo $2`_if_onoff
+    eval wl_parent_onoff=\$`echo $parent_radio`_if_onoff
+    eval wl_parent_exist=\$`echo $parent_radio`_exist
+
+    if [ "$wl_parent_exist" = "on" ] && [ "$wl_onoff" = "on" -o "$parent_radio" = "$2" ] && 
+        [ "$wl_parent_onoff" = "on" -o "$FORCE_CREATE_VAP" = "on" ]; then
+        eval export -- "${1}=on"
+    else
+        eval export -- "${1}=off"
+    fi
+}
+
+# This function is to get the prefix of environment variables.
+# If environment variables are all named according to same rule, then
+# this function will provide help on getting environment variables.
+get_wl_prefix()
+{
+    case "$1" in
+        wlg)
+            wl_prefix=wl
+            ;;
+        wla)
+            wl_prefix=wla
+                ;;
+        wlg_guest)
+            wl_prefix=wlg1
+            ;;
+        wla_guest)
+            wl_prefix=wla1
+            ;;
+    esac
+}
+
+assign_vap_option()
+{
+    eval wl_onoff=\$`echo $1`_if_onoff
+
+    if [ "$wl_onoff" = "off" -a "$FORCE_CREATE_VAP" = "on" ] || [ "$wl_onoff" = "on" -a "$wl_hw_btn_state" = "off" ]; then
+        uci set wireless.${1}.vap_only=1
+    fi
+}
+
+generate_mac()
+{
+    if [ "$1" = "wlg" ]; then
+        wl_value=`cat /tmp/mac_addr_2g`
+        [ -n "$wl_value" ] || {
+            wl_value=$mac_2g
+        }
+        uci set wireless.wifi0.macaddr=${wl_value:-"4C:60:DE:CE:61:AE"}
+    else
+        wl_value=`cat /tmp/mac_addr_5g`
+        [ -n "$wl_value" ] || {
+            wl_value=$mac_5g
+        }
+        uci set wireless.wifi1.macaddr=${wl_value:-"4C:60:DE:CE:61:AF"}
+    fi    
+}
+
+generate_channel()
+{
+    eval wl_value=\$`echo $1`_channel
+
+    if [ "$1" = "wlg" ]; then
+        uci set wireless.wifi0.channel=${wl_value}
+    else
+        uci set wireless.wifi1.channel=${wl_value}
+    fi
+}
+
+generate_hwmode()
+{
+    eval wl_value=\$`echo $1`_hwmode
+
+    if [ "$1" = "wlg" ]; then
+        uci set wireless.wifi0.hwmode=${wl_value:-auto}
+    else
+        uci set wireless.wifi1.hwmode=${wl_value:-auto}
+    fi
+}
+
+generate_htmode()
+{
+    eval wl_value=\$`echo $1`_htmode
+
+    if [ "$1" = "wlg" ]; then
+        uci set wireless.wifi0.htmode=${wl_value:-auto}
+    else
+        uci set wireless.wifi1.htmode=${wl_value:-auto}
+    fi
+}
+
+generate_tpscale()
+{
+    eval wl_value=\$`echo $1`_tpscale
+
+    if [ "$1" = "wlg" ]; then
+        uci set wireless.wifi0.tpscale=${wl_value:-0}
+    else
+        uci set wireless.wifi1.tpscale=${wl_value:-0}
+    fi
+
+}
+
+generate_wifi_hw_button_state()
+{
+    if [ "$wlg_exist" = "on" -a "$wla_exist" = "on" ]; then
+        hw_btn_state=$wl_hw_btn_state
+    else
+        if [ "$1" = "wifi0" ]; then
+            hw_btn_state=$wlg_if_onoff
+        else
+            hw_btn_state=$wla_if_onoff
+        fi
+    fi
+
+    if [ "$wl_cb_if_onoff" = "on" ]; then
+        hw_btn_state="on"
+    fi
+
+    uci set wireless.${1}.hw_btn_state=${hw_btn_state}
+}
+
+generate_mode()
+{
+#    eval wl_wds_onoff=\$`echo $1`_wds_onoff
+#    eval wl_wds_role=\$`echo $1`_wds_role
+#    if [ "$wl_wds_onoff" = "on" -a "$wl_wds_role" = "repeater" ]; then
+#        cat <<EOF >> $wifi_config
+#        option mode     wds
+#EOF
+#    else
+#        cat <<EOF >> $wifi_config
+#        option mode     ap
+#EOF
+#    fi
+    if [ "$wl_cb_if_onoff" = "on" ]; then
+        uci set wireless.${1}.mode=sta
+        uci set wireless.${1}.cb=dni
+    else
+        uci set wireless.${1}.mode=ap
+    fi
+}
+
+generate_vhtng()
+{
+    isHT40=`echo $wlg_htmode | grep HT40`
+    if [ "$vht_11ng" = "on" -a "x$isHT40" != "x" ]; then
+        uci set wireless.${1}.vht_11ng=1
+    fi
+}
+
+generate_wps()
+{
+    eval wps_onoff=\$`echo $1`_wps_onoff
+
+    if [ "$wps_onoff" = "off" ]; then
+        return;
+    fi
+    
+    if [ "$wsc_lock_down" = "1" ]; then
+        wl_wps_ap_setup_locked=1
+    else
+        eval wl_wps_ap_setup_locked=\$`echo $1`_wps_ap_setup_locked
+    fi
+
+    eval wl_wps_configured=\$`echo $1`_wps_configured
+    if [ "$wl_wps_configured" = "configured" ]; then
+        wl_wps_enable_onoff=2
+    else
+        wl_wps_enable_onoff=1
+    fi
+
+    wl_value=$wps_config_method
+    [ -n "$wl_value" ] || {
+        #default config method
+        wl_value="virtual_display virtual_push_button physical_push_button"
+    }
+
+    uci set wireless.${1}.ap_setup_locked=${wl_wps_ap_setup_locked}
+    uci set wireless.${1}.wps_state=${wl_wps_enable_onoff}
+    uci set wireless.${1}.wps_config="$wl_value"
+}
+
+generate_wps_device_name()
+{
+    eval wps_onoff=\$`echo $1`_wps_onoff
+    
+    if [ "$wps_onoff" = "off" ]; then
+        return;
+    fi
+
+    wl_device_name="`echo $wps_device_name`(Wireless AP)"
+
+    uci set wireless.${1}.wps_device_name="${wl_device_name}"
+}
+
+generate_ssid()
+{
+    eval wl_value=\$`echo $1`_ssid
+
+    # handle special characters
+    wl_value=$(echo $wl_value | sed  -e 's/\\"/\"/g')
+    wl_value=$(echo $wl_value | sed  -e 's/\\\\\\\\/\\/g')
+    wl_value=$(echo $wl_value | sed  -e 's/\\\\\\`/\`/g')
+
+    uci set wireless.${1}.ssid="$wl_value"
+}
+
+generate_hide_ssid()
+{
+    eval wl_value=\$`echo $1`_hide_ssid_onoff
+    if [ "$wl_value" = "on" ]; then
+        uci set wireless.${1}.hidden=1
+    else
+        uci set wireless.${1}.hidden=0
+    fi
+}
+
+generate_puren()
+{
+    eval wl_value=\$`echo $1`_puren_onoff
+    if [ "$wl_value" = "on" ]; then
+        uci set wireless.${1}.puren=1
+    fi
+}
+
+generate_doth()
+{
+    wl_doth=0
+    uci set wireless.${1}.doth=${wl_doth}
+}
+
+generate_disablecoext()
+{
+    eval wl_value=\$`echo $1`_disablecoext
+    uci set wireless.${1}.disablecoext=${wl_value:-0}
+}
+
+generate_security()
+{
+    eval wl_sectype=\$`echo $1`_sectype
+
+    case "$wl_sectype" in
+        off)
+            uci set wireless.${1}.encryption=none
+            ;;
+        *wep*)
+            get_wl_prefix "$1"
+            load_wep_config "$wl_prefix" "$1"
+            eval wl_wep_auth_type=\$wep_auth_type_`echo $((${1}_auth))`
+            case "$wl_wep_auth_type" in
+                open)
+                    auth_type="open"
+                    ;;
+                shared)
+                    auth_type="shared"
+                    ;;
+                *)
+                    auth_type="mixed"
+                    ;;
+            esac
+            eval wl_wep_keyix=\$`echo $1`_key
+            eval wl_key_length=\$`echo $1`_key_length
+            uci set wireless.${1}.encryption=${wl_sectype}-${auth_type}
+            uci set wireless.${1}.key=${wl_wep_keyix}
+            for idx in 1 2 3 4; do
+                eval wl_wep_key=\$`echo $1`_key${idx}
+                [ -n "$wl_wep_key" ] && {
+                    tmp_key_length=`expr length $wl_wep_key`
+                    if [ "$wl_key_length" = "5" ]; then
+                        if [ "$tmp_key_length" = "10" ]; then
+                            uci set wireless.${1}.key${idx}_format=HEX
+                        elif [ "$tmp_key_length" = "5" ]; then
+                            uci set wireless.${1}.key${idx}_format=ASCII
+                        fi
+                    else
+                        if [ "$tmp_key_length" = "26" ]; then
+                            uci set wireless.${1}.key${idx}_format=HEX
+                        elif [ "$tmp_key_length" = "13" ]; then
+                            uci set wireless.${1}.key${idx}_format=ASCII
+                        fi
+                    fi
+                }
+                uci set wireless.${1}.key${idx}=${wl_wep_key}
+            done
+            ;;
+        *psk*)
+            get_wl_prefix "$1"
+            dni_config_get_psk_phrase wl_psk_phrase "$wl_prefix" "$wl_sectype"
+            uci set wireless.${1}.encryption=${wl_sectype}
+
+            # handle special characters
+            wl_psk_phrase=$(echo $wl_psk_phrase | sed  -e 's/\\"/\"/g')
+            wl_psk_phrase=$(echo $wl_psk_phrase | sed  -e 's/\\\\/\\/g')
+            wl_psk_phrase=$(echo $wl_psk_phrase | sed  -e 's/\\`/\`/g')
+
+            uci set wireless.${1}.key="$wl_psk_phrase"
+            ;;
+        *wpa*)
+            get_wl_prefix "$1"
+            load_wpa_config "$wl_prefix"
+            uci set wireless.${1}.encryption=${_tmp_wpa}
+            uci set wireless.${1}.key=${wl_auth_sv_secret}
+            uci set wireless.${1}.server=${wl_auth_sv_ip}
+            uci set wireless.${1}.port=${wl_auth_sv_port}
+            ;;
+    esac
+            
+}
+
+generate_protocol_setting()
+{
+    parent_radio=`echo $1 | awk -F _ '{print $1}'`
+    eval wl_rts_value=\$`echo $parent_radio`_rts
+    eval wl_frag_value=\$`echo $parent_radio`_frag
+    eval wl_wmm_value=\$`echo $parent_radio`_wmm_onoff
+    eval wl_preamble_value=\$`echo $parent_radio`_preamble
+    eval wl_country_ie_value=\$`echo $parent_radio`_country_ie_onoff
+
+    uci set wireless.${1}.rts=${wl_rts_value}
+    uci set wireless.${1}.frag=${wl_frag_value}
+    if [ "$wl_wmm_value" = "on" ]; then
+        uci set wireless.${1}.wmm=1
+    else
+        uci set wireless.${1}.wmm=0
+    fi
+    if [ "$wl_country_ie_value" = "on" ]; then
+        uci set wireless.${1}.countryie=1
+    else
+        uci set wireless.${1}.countryie=0
+    fi
+    case "$wl_preamble_value" in
+        *long*)
+            uci set wireless.${1}.short_preamble=0
+            ;;
+        *)
+            uci set wireless.${1}.short_preamble=1
+            ;;
+    esac
+}
+
+generate_acl()
+{
+    parent_radio=`echo $1 | awk -F _ '{print $1}'`
+
+    eval wl_acl_onoff=\$`echo $parent_radio`_acl_onoff
+    if [ "$wl_acl_onoff" = "off" ]; then
+        return;
+    fi
+
+    uci set wireless.${1}.macfilter=allow
+    dni_config_get acl_sta_num wl_acl_num
+    acl_sta_num=${acl_sta_num:-0}
+    num=1
+    while [ $num -le $acl_sta_num ]; do
+        dni_config_get mac "wlacl${num}"
+        addr=$(echo "$mac" | while read name value; do echo "$value"; done)
+        uci add_list wireless.${1}.maclist=${addr}
+        num=$(($num + 1))
+    done
+}
+
+generate_wds()
+{
+    eval wl_wds_onoff=\$`echo $1`_wds_onoff
+    if [ "$wl_wds_onoff" = "off" ]; then
+        return
+    fi
+
+    eval wl_wds_role=\$`echo $1`_wds_role
+
+    # The variable naming of wds is different with others.
+    # Use another way for it.
+    case "$1" in
+        wlg)
+            wl_wds_postfix=
+            radio_device="wifi0"
+            ;;
+        wla)
+            wl_wds_postfix="_a"
+            radio_device="wifi1"
+            ;;
+    esac
+
+    # ROOTAP (Base station) section
+    if [ "$wl_wds_role" = "rootap" ]; then
+        for idx in 1 2 3 4; do
+            dni_config_get wl_repeater_mac repeater_mac${idx}${wl_wds_postfix}
+            if [ "x$wl_repeater_mac" != "x" ]; then
+                uci add_list wireless.${1}.maclist=${wl_repeater_mac}
+                uci add_list wireless.${1}.nawds_add_repeater=${wl_repeater_mac}
+            fi
+        done
+
+        dni_config_get wds_client_assoc_onoff wds_endis_mac_client${wl_wds_postfix}
+        if [ "$wds_client_assoc_onoff" = "off" ]; then
+            uci set wireless.${1}.macfilter=allow
+        fi
+        uci set wireless.${1}.mode=ap
+        uci set wireless.${1}.wds=1
+        uci set wireless.${1}.nawds_mode=1
+    fi
+
+    if [ "$wl_wds_role" = "repeater" ]; then
+        eval wl_wds_repeater_assoc_onoff=\$`echo $1`_wds_repeater_assoc_onoff
+        dni_config_get wl_wds_rootap_mac basic_station_mac${wl_wds_postfix}
+
+        if [ "$1" = "wlg" ]; then
+            # Does not allow wireless client association.
+            if [ "$wl_wds_repeater_assoc_onoff" = "off" ]; then
+                uci set wireless.${1}.mode=sta
+                uci set wireless.${1}.wds=1
+                uci set wireless.${1}.bssid=${wl_wds_rootap_mac}
+                # sta mode doesn't need set ssid
+                uci delete wireless.${1}.ssid
+            else
+                # allow wireless client association, so there will be two
+                # interfaces created.
+
+                # set wds ap vap
+                uci set wireless.${1}.mode=ap
+                uci set wireless.${1}.wds=1
+                uci set wireless.${1}.vap_ind=1
+
+                # set wds sta vap
+                uci set wireless."${1}_wds_sta"=wifi-iface
+                uci set wireless."${1}_wds_sta".network=lan
+                uci set wireless."${1}_wds_sta".device=${radio_device}
+                uci set wireless."${1}_wds_sta".bridge=${lan_ifname}
+                uci set wireless."${1}_wds_sta".mode=sta
+                uci set wireless."${1}_wds_sta".wds=1
+                uci set wireless."${1}_wds_sta".bssid=${wl_wds_rootap_mac}
+                uci set wireless."${1}_wds_sta".vap_ind=1
+            fi
+        else
+            uci set wireless.${1}.mode=ap
+            uci set wireless.${1}.wds=1
+            uci set wireless.${1}.wdspeerlist=${wl_wds_rootap_mac}
+            # Use QTN mac filter for reaching no client association.
+            if [ "$wl_wds_repeater_assoc_onoff" = "off" ]; then
+                uci set wireless.${1}.macfilter=allow
+                uci set wireless.${1}.hidden=1
+            fi
+        fi
+    fi
+
+}
+
+generate_bintval()
+{
+    case "$1" in
+        wlg)
+            uci set wireless.${1}.bintval=100
+            ;;
+        wla)
+            uci set wireless.${1}.bintval=100
+            ;;
+        wlg_guest)
+            uci set wireless.${1}.bintval=200
+            ;;
+        wla_guest)
+            uci set wireless.${1}.bintval=200
+            ;;
+    esac
+}
+
+generate_dtim()
+{
+    case "$1" in
+        wlg | wla)
+            eval guest_if_onoff=\$`echo $1`_guest_if_onoff
+            # guest network is disabled
+            if [ "$guest_if_onoff" = "off" ]; then
+                uci set wireless.${1}.dtim_period=${wl_dtim_wo_guest}
+            else
+                uci set wireless.${1}.dtim_period=${wl_dtim_w_guest}
+            fi
+            ;;
+        wlg_guest | wla_guest)
+            uci set wireless.${1}.dtim_period=${wl_guest_dtim}
+            ;;
+    esac
+}
+
+generate_PIN()
+{
+    /sbin/fetchPIN
+
+    if [ -f /tmp/wpspin-setted ]; then
+        pin_num=`cat /tmp/wpspin-setted`
+    else
+        pin_num=`cat /tmp/wpspin`
+    fi
+    uci set wireless.${1}.wps_pin=${pin_num-:12345670}
+}
+
+generate_lan_restricted_access()
+{
+    eval wl_lan_restricted_access_onoff=\$`echo $1`_lan_restricted_access_onoff
+    # if lan restricted access is off, it means every one can access the network, so
+    # we don't need to generate ebtables rules.
+    if [ "$wl_lan_restricted_access_onoff" = "off" ]; then
+        return;
+    fi
+
+    wl_guest_iptv_on=`config get wan_brig_guest_ssid1`
+    wla_guest_iptv_on=`config get wan_brig_guest_ssid2`
+    if [ "$1" = "wlg_guest" -a "${wl_guest_iptv_on}" = "1" ] || [ "$1" = "wla_guest" -a "${wla_guest_iptv_on}" = "1" ]; then
+        gui_region=`config get GUI_Region`
+        [ -f /tmp/firmware_region ] && firmware_region=`cat /tmp/firmware_region | awk '{print $1}'`
+        if [ "$firmware_region" = "" ] || [ "$firmware_region" = "WW" ]; then
+            if [ "$gui_region" = "Russian" ] || [ "$gui_region" = "Chinese" ]; then
+                return;
+            fi
+        elif [ "$firmware_region" = "RU" ] || [ "$firmware_region" = "PR" ]; then
+                return;
+        fi
+    fi
+
+    uci set wireless.${1}.lan_restricted=1
+    uci set wireless.${1}.lan_ipaddr=${lan_ipaddr}
+}
+
+generate_wireless_isolation()
+{
+    eval wl_wireless_isolation_onoff=\$`echo $1`_wireless_isolation_onoff
+    if [ "$wl_wireless_isolation_onoff" = "off" ]; then
+        return;
+    fi
+
+    uci set wireless.${1}.isolate=1
+}
+
+generate_bf()
+{
+    eval wl_bf_onoff=\$`echo $1`_bf_onoff
+    if [ "$wl_bf_onoff" = "off" ]; then
+        wl_value=0
+    else
+        wl_value=1
+    fi
+    if [ "$1" = "wlg" ]; then
+        uci set wireless.wifi0.bf=${wl_value}
+    else
+        uci set wireless.wifi1.bf=${wl_value}
+    fi
+}
+
+if [ "$wlg_exist" = "on" ]; then
+    uci set wireless.wifi0=wifi-device
+    uci set wireless.wifi0.type=qcawifi
+    uci set wireless.wifi0.country=${country_code}
+    uci set wireless.wifi0.ODM=dni
+    generate_wifi_hw_button_state "wifi0"
+    generate_mac "wlg"
+    generate_channel "wlg"
+    generate_hwmode "wlg"
+    generate_htmode "wlg"
+    generate_tpscale "wlg"
+fi
+
+if [ "$wla_exist" = "on" ]; then
+    uci set wireless.wifi1=wifi-device
+    uci set wireless.wifi1.type=qtwifi
+    uci set wireless.wifi1.country=${country_code}
+    uci set wireless.wifi1.config_interface=host0
+    uci set wireless.wifi1.config_host_ip=1.1.1.1
+    uci set wireless.wifi1.config_device_ip=1.1.1.2
+    uci set wireless.wifi1.ODM=dni
+    generate_wifi_hw_button_state "wifi1"
+    generate_mac "wla"
+    generate_channel "wla"
+    generate_hwmode "wla"
+    generate_htmode "wla"
+    generate_tpscale "wla"
+    generate_bf "wla"
+fi
+
+get_intf_onoff _tmp_wlg_onoff "wlg"
+if [ "$_tmp_wlg_onoff" = "on" ]; then
+    uci set wireless.wlg=wifi-iface
+    uci set wireless.wlg.device=wifi0
+    uci set wireless.wlg.network=lan
+    uci set wireless.wlg.bridge=${lan_ifname}
+    assign_vap_option "wlg"
+    generate_mode "wlg"
+    generate_vhtng "wlg"
+    generate_wps "wlg"
+    generate_wps_device_name "wlg"
+    generate_ssid "wlg"
+    generate_hide_ssid "wlg"
+    generate_puren "wlg"
+    generate_doth "wlg"
+    generate_disablecoext "wlg"
+    generate_security "wlg"
+    generate_protocol_setting "wlg"
+    generate_acl "wlg"
+    generate_wds "wlg"
+    generate_bintval "wlg"
+    generate_dtim "wlg"
+    generate_PIN "wlg"
+fi
+
+get_intf_onoff _tmp_wla_onoff "wla"
+if [ "$_tmp_wla_onoff" = "on" ]; then
+    uci set wireless.wla=wifi-iface
+    uci set wireless.wla.device=wifi1
+    uci set wireless.wla.network=lan
+    uci set wireless.wla.confidx=0
+    uci set wireless.wla.bridge=${lan_ifname}
+    assign_vap_option "wla"
+    generate_mode "wla"
+    generate_wps "wla"
+    generate_wps_device_name "wla"
+    generate_ssid "wla"
+    generate_hide_ssid "wla"
+    generate_puren "wla"
+    generate_doth "wla"
+    generate_disablecoext "wla"
+    generate_security "wla"
+    generate_protocol_setting "wla"
+    generate_acl "wla"
+    generate_wds "wla"
+    generate_bintval "wla"
+    generate_dtim "wla"
+    generate_PIN "wla"
+fi
+
+get_intf_onoff _tmp_wlg_guest_onoff "wlg_guest"
+if [ "$_tmp_wlg_guest_onoff" = "on" ]; then
+    uci set wireless.wlg_guest=wifi-iface
+    uci set wireless.wlg_guest.device=wifi0
+    uci set wireless.wlg_guest.network=lan
+    uci set wireless.wlg_guest.bridge=${lan_ifname}
+    assign_vap_option "wlg_guest"
+    generate_mode "wlg_guest"
+    generate_vhtng "wlg_guest"
+    generate_ssid "wlg_guest"
+    generate_security "wlg_guest"
+    generate_hide_ssid "wlg_guest"
+    generate_protocol_setting "wlg_guest"
+    generate_acl "wlg_guest"
+    generate_lan_restricted_access "wlg_guest"
+    generate_wireless_isolation "wlg_guest"
+    generate_bintval "wlg_guest"
+    generate_dtim "wlg_guest"
+    generate_doth "wlg_guest"
+    generate_disablecoext "wlg_guest"
+fi
+
+get_intf_onoff _tmp_wla_guest_onoff "wla_guest"
+if [ "$_tmp_wla_guest_onoff" = "on" ]; then
+    uci set wireless.wla_guest=wifi-iface
+    uci set wireless.wla_guest.device=wifi1
+    uci set wireless.wla_guest.network=lan
+    uci set wireless.wla_guest.confidx=1
+    uci set wireless.wla_guest.bridge=${lan_ifname}
+    assign_vap_option "wla_guest"
+    generate_mode "wla_guest"
+    generate_ssid "wla_guest"
+    generate_security "wla_guest"
+    generate_hide_ssid "wla_guest"
+    generate_protocol_setting "wla_guest"
+    generate_acl "wla_guest"
+    generate_lan_restricted_access "wla_guest"
+    generate_wireless_isolation "wla_guest"
+    generate_bintval "wla_guest"
+    generate_dtim "wla_guest"
+fi
+
+uci commit

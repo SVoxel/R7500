@@ -1,0 +1,80 @@
+<% http_header("style/form.css", "/funcs.js") %>
+<% hijack_language() %>
+<script language="javascript" type="text/javascript">
+function loadvalue()
+{
+	if(top.location.href.indexOf("BRS_index.htm") > 0)
+	{
+		document.getElementById("few_seconds").style.display = "none";
+		document.getElementById("cancel_btn").style.display = "none";
+		document.getElementById("ok_btn").style.display = "";
+	}
+	else{
+		if(top.hidden_upgrade)
+		{
+			document.getElementById("few_seconds").style.display = "none";
+			document.getElementById("cancel_btn").style.display = "";
+		}
+		else
+		{
+			document.getElementById("few_seconds").style.display = "";
+			document.getElementById("cancel_btn").style.display = "none";
+			setTimeout("goback()", 4000);
+		}
+	}
+}
+
+function goback()
+{
+	if(top.location.href.indexOf("BRS_index.htm") != -1||(top.location.href.indexOf("adv_index.htm") != -1&& top.setup_wizard_flag == 1))
+		this.location.href = "BRS_hdd_success.htm";
+	else{
+		if(top.hidden_upgrade)  //if top.hidden_upgrade exits, top is CheckNewFirmware.htm
+			this.location.href = "CheckNewFW_upgrade.htm";
+		else
+			this.location.href = "UPG_upgrade.htm";
+	}
+}
+
+function goto_success()
+{
+	this.location.href = "BRS_hdd_success.htm";
+}
+</script>
+
+<body bgcolor="#ffffff" onload="loadvalue();">
+<script>
+if(top.location.href.indexOf("BRS_index.htm") > 0)
+	document.write('<div class="page_title">'+wait_upg_head+'</div>');
+else
+	document.write('<div class="page_title">$firmware_check</div>');
+</script>
+
+<div id="main" class="main">
+	<img src="/liteblue.gif" width="100%" height="12" />
+	<div align="center">
+		<br />
+	<script>
+if(top.location.href.indexOf("BRS_index.htm") > 0)
+	document.write('<b>'+no_new_version+'</b>');
+else
+	document.write('<b>$no_new_version</b>');
+</script>	
+	</div>
+	<img src="/liteblue.gif" width="100%" height="12" />
+		<script>
+if(top.location.href.indexOf("BRS_index.htm") > 0)
+	document.write('<div id="few_seconds" align="center">'+few_second+'</div>');
+else
+	document.write('<div id="few_seconds" align="center">$few_second</div>');
+</script>	
+	<div id="cancel_btn" align="center">
+		<input type="button" class="cancel_bt" name="cancel" value="$quit_mark" onclick="goto_success();" />
+	</div>
+	<div id="ok_btn" align="center" style="display:none"><script>
+                document.write('<input type="button" class="short_common_bt" name="cancel" value='+OK_mark+' onclick="goto_success();" />');
+	</script>
+        </div>
+</div>
+</body>
+</html>

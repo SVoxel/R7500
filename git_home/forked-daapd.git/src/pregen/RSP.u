@@ -1,0 +1,6 @@
+RSPParser.c : RSP.g
+./RSP.tokens : RSP.g
+RSPParser.h : RSP.g
+RSPLexer.c : RSP.g
+RSPLexer.h : RSP.g
+ANTLR_PRODUCTS += RSPParser.c ./RSP.tokens RSPParser.h RSPLexer.c RSPLexer.h 

@@ -1,0 +1,8 @@
+#!/bin/sh
+wps_5g_exist=`pidof 5g-wps-process`
+[ -z "$wps_5g_exist" ] && {
+        touch /tmp/wps_start_by_2g
+        exit
+}
+killall 5g-wps-process
+ACTION="CANCEL_WPS" /lib/wifi/5g-wps-process

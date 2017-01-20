@@ -1,0 +1,22 @@
+QCA Single Image Tool
+
+
+How to Generate Single Image:
+=============================
+
+1. Add config.mk file and add following 2 lines in it:
+
+CONFIG_QCA_SINGLE_IMG_GIT = <git repository of QCA single image tool>
+CONFIG_QCA_SINGLE_IMG_TREEISH = <commit ID of QCA single image tool you want to fetch>
+
+2. Issue following command:
+
+$ make TOPDIR=/dir/of/config.mk
+
+Single Image containing U-Boot is "u-boot-single.img"
+
+Other Notes:
+============
+
+* If you want to force reloading QCA Single Image tool, just remove
+  qsdk-chipcode/.prepared_*

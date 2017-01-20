@@ -1,0 +1,47 @@
+#!/bin/sh  /etc/rc.common
+#
+# Copyright (c) 2013 The Linux Foundation. All rights reserved.
+#
+# The shebang above has an extra space intentially to avoid having
+# openwrt build scripts automatically enable this package starting
+# at boot.
+
+START=70
+
+load_nss_connmgr() {
+	rmmod nf_conntrack_netlink
+	[ -d /sys/module/qca_nss_connmgr_ipv4 ] || insmod qca-nss-connmgr-ipv4
+	[ -d /sys/module/qca_nss_connmgr_ipv6 ] || insmod qca-nss-connmgr-ipv6
+}
+
+unload_nss_connmgr() {
+	[ -d /sys/module/qca_nss_connmgr_ipv6 ] && {
+		echo 1 > /sys/nom_v6/stop
+		sleep 1
+		echo f > /proc/net/nf_conntrack
+		sleep 3
+		echo 1 > /sys/nom_v6/terminate
+		sleep 2
+		rmmod qca_nss_connmgr_ipv6
+	}
+
+	[ -d /sys/module/qca_nss_connmgr_ipv4 ] && {
+		echo 1 > /sys/nom_v4/stop
+		sleep 1
+		echo f > /proc/net/nf_conntrack
+		sleep 3
+		echo 1 > /sys/nom_v4/terminate
+		sleep 2
+		rmmod qca_nss_connmgr_ipv4
+	}
+	insmod nf_conntrack_netlink
+}
+
+start() {
+	local proto=$($CONFIG get wan_proto)
+	[ "$proto" = "static" -o "$proto" = "dhcp" -o "$proto" = "pppoe" ] && load_nss_connmgr
+}
+
+stop() {
+	unload_nss_connmgr
+}
