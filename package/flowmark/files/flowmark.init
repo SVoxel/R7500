@@ -21,7 +21,7 @@ REDIS_PORT=6379
 . $STREAMBOOST_USER_CFG
 
 nss_qdisc_is_installed() {
-	opkg list | grep kmod-qca-nss-qdisc >/dev/null 2>&1
+	/bin/opkg list | grep kmod-qca-nss-qdisc >/dev/null 2>&1
 	[ "$?" = "0" ] || return 1
 }
 
